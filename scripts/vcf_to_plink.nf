@@ -1,6 +1,12 @@
 nextflow.enable.dsl=2
 
+//to run must have nextflow and miniconda3 loaded.
+//see yaml of conda env packages included in project
+//also need to install AlphaPlantImpute2 separately 
+
 //  Set up parameters
+// tools
+params.conda = '/home/nicolas.lara/.conda/envs/imputation'
 // directories
 params.vcf_dir = '/project/guedira_seq_map/nico/vcf_files'
 params.output_dir = '/90daydata/guedira_seq_map/plink_output'
@@ -10,6 +16,9 @@ params.parents = '/project/guedira_seq_map/nico/sunrils_parents.txt'
 
 
 process process_vcfs {
+//    conda '${params.conda}'
+    conda '/home/nicolas.lara/.conda/envs/imputation'
+
     input:
     path vcf
 
@@ -37,6 +46,8 @@ process mask_pop_vcfs {
     output:
     path '*.vcf', emit: vcf
 
+    conda '${CONDA_ENV}'
+
     script:
     sample = vcf.baseName
     """
@@ -60,11 +71,14 @@ process mask_pop_vcfs {
 }
 
 process vcf_to_plink {
+    conda '/home/nicolas.lara/.conda/envs/imputation'
+
     input:
     tuple path(parent_vcf), path(population_vcf)
 
     output:
     tuple path("${parent_vcf.baseName}.ped"), path("${population_vcf.baseName}.ped")
+
 
     script:
     """
@@ -75,11 +89,14 @@ process vcf_to_plink {
 
 process impute {
     publishDir "${params.output_dir}", mode: 'copy'
+    conda '/home/nicolas.lara/.conda/envs/imputation'
+
     input:
     tuple path(parent_plink), path(population_plink)
 
     output:
     path("${population_plink.baseName}_imputed*"), emit: imputed
+
 
     script:
     """
@@ -96,6 +113,8 @@ process plink_to_vcf {
     output:
     path vcf
 
+    conda '${CONDA_ENV}'
+
     script:
     sample = plink.baseName
     """
@@ -110,6 +129,8 @@ process accuracy_evaluation {
 
     output:
     path "*.txt", emit accuracy
+
+    conda '${CONDA_ENV}'
 
     script:
     """
