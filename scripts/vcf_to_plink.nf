@@ -28,45 +28,61 @@ process process_vcfs {
     script:
     sample = vcf.baseName
     """
+    ##rename chromosomes to numbers for downstream processing
     bcftools annotate --rename-chrs ${params.chrom_remap} ${vcf} > vcf1.vcf
+    ##remove unknown/unaligned markers, filter to biallelic with MAF > 0.05
     bcftools view -t "^UN,Unknown" vcf1.vcf > vcf2.vcf
     bcftools view -m2 -M2 -v snps -i'MAF>0.05' vcf2.vcf > vcf3.vcf
+    ##filter to one chromosome for testing
     bcftools view -t 1 vcf3.vcf > vcf4.vcf
     mv vcf4.vcf vcf3.vcf
+    ##split into parent and population files
     bcftools view -S ${params.parents} vcf3.vcf > ${sample}_parents.vcf
     bcftools view -S ^${params.parents} vcf3.vcf > ${sample}_pop.vcf
+    ##clean up
     rm vcf*.vcf
     """
 }
 
 process mask_pop_vcfs {
     input:
-    path vcf
+    path vcf_file
 
     output:
-    path '*.vcf', emit: vcf
+    tuple path("pop_masked.vcf.gz"), path("pop_antimasked.vcf.gz")
 
     conda '${CONDA_ENV}'
 
     script:
     sample = vcf.baseName
     """
-    import random
-    import pysam
-
-    # Open the VCF file
-    vcf = pysam.VariantFile("truth_data.vcf", "r")  # Open the VCF in read mode
-    output_vcf = pysam.VariantFile("masked_90.vcf", "w", header=vcf.header)
-
-    # Loop through records and randomly mask genotypes
-    for rec in vcf.fetch():
-        for sample in rec.samples:
-            if random.random() < 0.9:  # Mask 90% of the genotypes
-                rec.samples[sample]["GT"] = (None,)  # Set genotype to missing
-        output_vcf.write(rec)
-
-    output_vcf.close()
-    vcf.close()
+    #!/usr/bin/env Rscript
+    library(vcfR)
+    ##read in file and extract markers
+    vcf <- read.vcfR("${vcf_file}")
+    gt <- extract.gt(vcf, as.numeric=T)
+    ##split into two matrices, masking a complementary n% of each
+    n <- 0.5
+    masks <- apply(gt, MARGIN = 2, function(x) {
+        na_indices <- sample(length(x), length(x) * n)
+        x_inverse <- x
+        x[na_indices] <- NA
+        x_inverse[-na_indices] <- NA
+        list(mask = x, antimask = x_inverse)
+    }
+    ##turn into two matrices
+    mask_m <- do.call(cbind, lapply(masks, function(col), col$mask)
+    anti_m <- do.call(cbind, lapply(masks, function(col), col$antimask)
+    colnames(mask_m) <- colnames(gt); rownames(mask_m) <- rownames(gt)
+    colnames(anti_m) <- colnames(gt); rownames(anti_m) <- rownames(gt)
+    ##coerce back into vcfR object and save
+    mask_vcf <- vcf; anti_vcf <- vcf
+    mask_vcf@fix <- mask_vcf@fix[mask_vcf@fix[,"ID"] %in% rownames(mask_m),]
+    mask_vcf@gt <- cbind(as.matrix(data.frame(FORMAT = rep("GT", nrow(mask_m)))), mask_m)
+    write.vcf(mask_vcf, file="pop_masked.vcf.gz")
+    anti_vcf@fix <- anti_vcf@fix[anti_vcf@fix[,"ID"] %in% rownames(anti_m),]
+    anti_vcf@gt <- cbind(as.matrix(data.frame(FORMAT = rep("GT", nrow(anti_m)))), anti_m)
+    write.vcf(anti_vcf, file="pop_antimasked.vcf.gz")
     """
 }
 
@@ -82,8 +98,8 @@ process vcf_to_plink {
 
     script:
     """
-    plink --vcf ${parent_vcf} --recode --out ${parent_vcf.baseName}
-    plink --vcf ${population_vcf} --recode --out ${population_vcf.baseName}
+    plink --vcf ${parent_vcf} --recode --keep-allele-order --out ${parent_vcf.baseName}
+    plink --vcf ${population_vcf} --recode --keep-allele-order --out ${population_vcf.baseName}
     """
 }
 
