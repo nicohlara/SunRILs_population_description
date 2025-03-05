@@ -46,20 +46,20 @@ process process_vcfs {
 
 process mask_pop_vcfs {
     input:
-    path vcf_file
+    tuple path(vcf_parents), path(vcf_pop)
 
     output:
-    tuple path("pop_masked.vcf.gz"), path("pop_antimasked.vcf.gz")
+    tuple path(vcf_parents), path("${sample}_masked.vcf.gz"), path("${sample}_antimasked.vcf.gz")
 
     conda '${CONDA_ENV}'
 
     script:
-    sample = vcf.baseName
+    sample = vcf_pop.baseName
     """
     #!/usr/bin/env Rscript
     library(vcfR)
     ##read in file and extract markers
-    vcf <- read.vcfR("${vcf_file}")
+    vcf <- read.vcfR("${vcf_pop}")
     gt <- extract.gt(vcf, as.numeric=T)
     ##split into two matrices, masking a complementary n% of each
     n <- 0.5
@@ -79,10 +79,10 @@ process mask_pop_vcfs {
     mask_vcf <- vcf; anti_vcf <- vcf
     mask_vcf@fix <- mask_vcf@fix[mask_vcf@fix[,"ID"] %in% rownames(mask_m),]
     mask_vcf@gt <- cbind(as.matrix(data.frame(FORMAT = rep("GT", nrow(mask_m)))), mask_m)
-    write.vcf(mask_vcf, file="pop_masked.vcf.gz")
+    write.vcf(mask_vcf, file="${sample}_masked.vcf.gz")
     anti_vcf@fix <- anti_vcf@fix[anti_vcf@fix[,"ID"] %in% rownames(anti_m),]
     anti_vcf@gt <- cbind(as.matrix(data.frame(FORMAT = rep("GT", nrow(anti_m)))), anti_m)
-    write.vcf(anti_vcf, file="pop_antimasked.vcf.gz")
+    write.vcf(anti_vcf, file="${sample}_antimasked.vcf.gz")
     """
 }
 
@@ -90,16 +90,16 @@ process vcf_to_plink {
     conda '/home/nicolas.lara/.conda/envs/imputation'
 
     input:
-    tuple path(parent_vcf), path(population_vcf)
+    tuple path(parent_vcf), path(pop_vcf_mask), path(pop_vcf_anti)
 
     output:
-    tuple path("${parent_vcf.baseName}.ped"), path("${population_vcf.baseName}.ped")
+    tuple path("${parent_vcf.baseName}.ped"), path("${pop_vcf_mask.baseName}.ped"), path(pop_vcf_anti)
 
 
     script:
     """
     plink --vcf ${parent_vcf} --recode --keep-allele-order --out ${parent_vcf.baseName}
-    plink --vcf ${population_vcf} --recode --keep-allele-order --out ${population_vcf.baseName}
+    plink --vcf ${pop_vcf_mask} --recode --keep-allele-order --out ${pop_vcf_mask.baseName}
     """
 }
 
@@ -108,10 +108,10 @@ process impute {
     conda '/home/nicolas.lara/.conda/envs/imputation'
 
     input:
-    tuple path(parent_plink), path(population_plink)
+    tuple path(parent_plink), path(population_plink), path(pop_vcf_anti)
 
     output:
-    path("${population_plink.baseName}_imputed*"), emit: imputed
+    tuple path("${population_plink.baseName}_imputed*"), path(pop_vcf_anti)
 
 
     script:
@@ -124,10 +124,10 @@ process impute {
 process plink_to_vcf {
     publishDir "{params.output_dir}", mode: 'copy'
     input:
-    path plink
+    tuple path(plink), path(pop_vcf_anti)
 
     output:
-    path vcf
+    tuple path(${sample}.vcf), path(pop_vcf_anti)
 
     conda '${CONDA_ENV}'
 
@@ -137,6 +137,57 @@ process plink_to_vcf {
     plink --bfile ${plink} --recode vcf --out ${sample}
     """
 }
+
+process check_imp_accuracy {
+    input:
+    tuple path(imp_vcf), path(anti_vcf)
+
+    output:
+    path ${sample}_impute_accuracy.txt
+
+    conda '${CONDA_ENV}'
+
+    script:
+    sample = vcf_pop.baseName
+    """
+    #!/usr/bin/env Rscript
+    library(vcfR)
+    ##read in file and extract markers
+    imputed <- read.vcfR(${imp_vcf})
+    complement <- read.vcfR(${anti_vcf})
+    ##for GBS data
+    gti <- extract.gt(imputed)
+    gtc <- extract.gt(complement, as.numeric = T)    
+    markers <- complement@fix[, c("ID", "REF", "ALT")]
+    markers_good <- markers[markers[, "REF"] == imputed@fix[, "REF"] &
+    markers[, "ALT"] == imputed@fix[, "ALT"], ]
+    markers_flipped <- markers[markers[, "REF"] == imputed@fix[, "ALT"] &
+    markers[, "ALT"] == imputed@fix[, "REF"], ]
+
+    ## recode into major/hetero/minor
+    gti[gti == "1/1"] <- 2
+    gti[gti == "0/1"] <- 1
+    gti[gti == "0/0"] <- 0
+    mode(gti) <- "numeric"
+    gtc[gtc == "1"] <- 2
+    gtc[gtc == "0"] <- 0
+
+    ## flip markers that need it
+    gti[rownames(gti) %in% markers_flipped[, "ID"], ] <- abs(gti[rownames(gti) %in% markers_flipped[, "ID"], ] - 2)
+
+    ## compare
+    gti_align <- gti[rownames(gtc), colnames(gtc)]
+    check_positions <- !is.na(gtc) & !is.na(gti_align)
+    combination_table <- table(gtc[check_positions], gti_align[check_positions])
+    combination_table
+    total <- sum(combination_table)
+    per_comb <- round(combination_table / total, 3)
+    output <- as.vector(per_comb)
+    names(output) <- c("major/major", "minor/major", "major/het", "minor/het", "major/minor", "minor/minor")
+    write.table(data.frame(t(a)), file="${sample}_accuracy.csv", quote=F, sep=",", row.names=F)
+    """
+}
+
 
 process accuracy_evaluation {
     input:
