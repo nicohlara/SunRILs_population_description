@@ -4,7 +4,8 @@
 
 library(gaston)
 
-setwd("C:/Users/nalara/Documents/GitHub/playground/filter_test")
+#setwd("C:/Users/nalara/Documents/GitHub/playground/filter_test")
+setwd("/90daydata/guedira_seq_map/nico/SunRILs_adhoc")
 
 vcf_file_name<-"SunRILs_prod_filt.vcf.gz"
 geno <- gaston::read.vcf(vcf_file_name, convert.chr=F)
@@ -62,7 +63,7 @@ vcf_head <- vcf_head[1:head_end]
 # vcf_hqlesead[head_end+1] <- "##R/gaston select.snps hz <= 0.05, select.inds missing < 0.7"
 
 vcf_df <- data.frame(CHROM=geno@snps$chr,
-                     POS=geno@snps$pos,
+                     POS=as.character(geno@snps$pos),
                      ID=geno@snps$id,
                      REF=geno@snps$A1,
                      ALT=geno@snps$A2,
@@ -94,4 +95,4 @@ if (identical(rownames(vcf_content), vcf_df$ID)) {
 
 vcf_body_head <- paste0("#", paste(colnames(vcf_df), collapse="\t"))
 vcf_output <- c(vcf_head, vcf_body_head, vcf_body)
-writeLines(vcf_output, "gaston.vcf")
+writeLines(vcf_output, "SunRILs_prod_filt2.vcf")

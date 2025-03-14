@@ -1,8 +1,16 @@
 #!/bin/bash
-
-
-
-
+#SBATCH --job-name="bcf_filtering"
+#SBATCH --qos=normal
+#SBATCH -p atlas
+#SBATCH -A guedira_seq_map
+#SBATCH -N 1
+#SBATCH -n 48
+#SBATCH -t 7-00:00:00
+#SBATCH --mail-user=nalara@ncsu.edu
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH -o "stdout.%x.%j.%N"
+#SBATCH -e "stderr.%x.%j.%N"
 
 
 ##UNAPLIED_FILTERS:
@@ -22,6 +30,12 @@
 #rename lines
 #aggregate duplicated lines
 
+module load miniconda3
+conda activate imp_2
+
+DIR=/90daydata/guedira_seq_map/nico/SunRILs/raw_VCF
+
+cd $DIR
 VCF_IN=SunRILs_production.vcf.gz
 VCF_OUT=SunRILs_prod_filt.vcf.gz
 
@@ -29,7 +43,7 @@ VCF_OUT=SunRILs_prod_filt.vcf.gz
 ##filter by maf
 ##smallest biparental has 144 RILs, total pop has 3.8k.
 ##Took 144/3800*0.03125 (smallest rare allele likelihood in this pop) = threshold
-bcftools view -i 'FORMAT/DP>1 && MAF>0.0012 && F_MISSING<0.2' ${VCF_IN} -Oz -o  DP_MAF_MISS_filt.vcf.gz
+bcftools view -i 'FORMAT/DP>1 && MAF>0.0012 && F_MISSING<0.1' ${VCF_IN} -Oz -o  DP_MAF_MISS_filt.vcf.gz
 
 ##filter to biallelic SNP                                                                                                           
 bcftools view -m2 -M2 -v snps DP_MAF_MISS_filt.vcf.gz -Oz -o  biallelic.vcf.gz
