@@ -1,100 +1,65 @@
 ## run GWAS using ASRgwas package
 ## Nicolas A. H. Lara
 
-set.wd(here())
-
+library(here)
 library(ASRgwas)
-library(vcfR)
+library(gaston)
+library(dplyr)
 
-blues <- read.delim("data/blues.csv")
-genotype <- read.vcfR("data/SunRILs_filt_imp.vcf.gz")
+setwd(here())
+
+
+blues <- read.delim("data/blues.csv", sep=",") %>%
+  mutate(Cross_ID = as.factor(Cross_ID)) %>%
+  rename(Genotype = Entry)
+genotype <- read.vcf("data/SunRILs_prod_filt_imp.vcf.gz", convert.chr=F)
+
+##take smallest biparental and get proportion of whole pop
+##then multiply by reasonable MAF for F4 genotyped individuals
+table(blues$Cross_ID)
+MAF_threshold <- (110/sum(table(blues$Cross_ID)))*0.5^4 
 
 ##filter genotype by entries in blues file
+# genotype <- select.inds(genotype, id %in% blues$Entry) 
+# Mapping vector for renaming chromosomes
+# mapping <- c("1A", "1B", "1D", "2A", "2B", "2D", "3A", "3B", "3D", 
+#              "4A", "4B", "4D", "5A", "5B", "5D", "6A", "6B", "6D", 
+#              "7A", "7B", "7D")
+# genotype@snps$chr <- match(genotype@snps$chr, mapping)
 
+  
 ##filter blues by entries in genotype
+# blues <- filter(blues, Entry %in% genotype@ped$id) %>%
+#   rename(Genotype = Entry)
 
-
-##preprocess for gwas
-gwas_obj <- pre.gwas(pheno.data = blues,
-                     indiv = 'Genotype',
-                     geno.data = geno.asr,
-                     resp = 'flowering',
-                     map.data = geno.map)
-
-
-
-
-gwas <- gwas.asreml(pheno.data = gwas_obj$pheno.data,
-                         resp = 'flowering', gen = 'Genotype',
-                         Kinv = gwas_obj$Kinv,
-                         geno.data = gwas_obj$geno.data, map.data = gwas_obj$map.data,
-                         pvalue.thr = 0.0005, bonferroni = FALSE)
-
-sign.markers <- gwas_test$gwas.sel$marker
-geno.data.sel <- gwas_obj$geno.data[, sign.markers]
-set <- select.marker(gwas.object = gwas_test,
-                     geno.data.sel = geno.data.sel,
-                     ref.vc = 1, pvalue.thr = 0.01)
-
-
-
-
-
-
-pheno_subset <- filter(phenotype, Year %in% c(2022, 2023)) %>%
-  rename(Genotype = Entry)
-# pheno_subset <- filter(pheno_subset, Cross_ID == 'UX2013')
-#library(ASRgenomics)
-#pheno_subset <- rename(phenotype, Genotype = Entry)
-# pheno_subset <- filter(phenotype, !is.na(height_range)) %>%
-#   rename(Genotype = Entry, meas_height = Height, Height = height_range) %>%
-#   mutate(Height = Height*100)
-genotype_subset <- select.inds(genotype, id %in% pheno_subset$Genotype) 
-pheno_subset <- filter(pheno_subset, Genotype %in% genotype_subset@ped$id) %>%
-  select(c(Location, Year, row, column, Tray, Cross_ID, Genotype, flowering, Height, WDR, Powdery_mildew))
-geno.asr <- as.matrix(genotype_subset)
-geno.map <- genotype_subset@snps %>%
+geno.map <- genotype@snps %>%
   dplyr::select(id, chr, pos) %>%
   rename(marker = id, chrom = chr)
 
+bonf_threshold <- (0.1 / ncol(genotype))
 
-library(ASRgwas)
+for (trait in c("flowering", "Height", "Powdery_mildew", "WDR")) {
+  ##preprocess for gwas
+  # gb <- blues[,c("Genotype", trait)]
+  gwas_obj <- pre.gwas(pheno.data = blues,
+                       indiv = 'Genotype',
+                       geno.data = as.matrix(genotype),
+                       resp = trait,
+                       map.data = geno.map,
+                       maf=MAF_threshold)
+  
+  gwas <- gwas.asreml(pheno.data = gwas_obj$pheno.data,
+                      resp = trait,
+                      gen = 'Genotype',
+                      Kinv = gwas_obj$Kinv,
+                      geno.data = gwas_obj$geno.data,
+                      map.data = gwas_obj$map.data, 
+                      bonferroni = F,
+                      pvalue.thr=bonf_threshold)
+  
+  gtable <- gwas$gwas.sel
+  gtable$trait <- trait
+  if (exists("GWAS_table")) {GWAS_table <- rbind(GWAS_table, gtable)} else {GWAS_table <- gtable}
+}
 
-gwas_obj <- pre.gwas(pheno.data = pheno_subset,
-                     indiv = 'Genotype',
-                     geno.data = geno.asr,
-                     resp = 'flowering',
-                     map.data = geno.map)
-##tested using best naive guesses as to model factors
-# gwas_test <- gwas.asreml(pheno.data = gwas_obj$pheno.data,
-#             resp = 'flowering',
-#             gen = 'Genotype',
-#             Kinv = gwas_obj$Kinv,
-#             fixedf = c('Location', 'Year'),
-#             geno.data = gwas_obj$geno.data,
-#             map.data = gwas_obj$map.data)\
-gwas_test <- gwas.asreml(pheno.data = gwas_obj$pheno.data,
-                         resp = 'flowering', gen = 'Genotype',
-                         fixedf = c('Location', 'Year'), # residual = c('row', 'column'),
-                         Kinv = gwas_obj$Kinv,
-                         geno.data = gwas_obj$geno.data, map.data = gwas_obj$map.data,
-                         pvalue.thr = 0.0005, bonferroni = FALSE)
-
-sign.markers <- gwas_test$gwas.sel$marker
-geno.data.sel <- gwas_obj$geno.data[, sign.markers]
-set <- select.marker(gwas.object = gwas_test,
-                     geno.data.sel = geno.data.sel,
-                     ref.vc = 1, pvalue.thr = 0.01)
-# set$gwas.sel
-# set$call
-# 
-# qq.plot(gwas_test$gwas.all)
-
-plot <- manhattan.plot(gwas.table=gwas_test$gwas.all, pvalue.thr = 1e-4, point.size = 3) +     theme(plot.background = element_rect(fill='transparent', color=NA))
-plot
-#ggsave(filename = paste0(dir, '../figures/', 'SunRILs_GWAS', '.png'), plot, width = 24, height = 8, dpi = 300, bg = 'transparent') 
-pm_filter <- filter(gwas_test$gwas.sel, (effect >= .35 | effect <=-.35) & std.error < 0.1 & p.value < 1e-05)
-
-ASRgwas::map.plot(map.data = gwas_test$gwas.all,
-                  tag.markers = pm_filter$marker) + #gwas_test$gwas.sel$marker) +
-  ggtitle('Powdery_mildew QTL')
+write.table(GWAS_table, "outputs/asreml_gwas.tsv", quote=F, sep="\t", row.names=F)
