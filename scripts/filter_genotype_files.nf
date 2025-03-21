@@ -7,8 +7,8 @@ nextflow.enable.dsl=2
 // tools
 params.conda = '/home/nicolas.lara/.conda/envs/imputation'
 // directories
-params.vcf_dir = '/90daydata/guedira_seq_map/nico/SunRILs/raw_VCF'
-params.output_dir = '/90daydata/guedira_seq_map/nico/SunRILs'
+params.vcf_dir = '/90daydata/guedira_seq_map/nico/SunFilt'
+params.output_dir = '/90daydata/guedira_seq_map/nico/SunFilt'
 
 // BCFtools filtering parameters
 params.depth = '1'
@@ -34,17 +34,16 @@ process bcftools_filter {
     script:
     sample = vcf.baseName
     """
-	bcftools view -i 'FORMAT/DP>${params.depth} && MAF > ${params.MAF} && F_MISSING<${params.missing}' ${vcf} -Oz -o DP_MAF_MISS_filter.vcf.gz
-	bcftools view -m2 -M2 -v snps DP_MAF_MISS_filter.vcf.gz -Oz -o  biallelic.vcf.gz
-	bcftools view -t "^UNKNOWN" biallelic.vcf.gz -Oz -o  "${sample}_filt.vcf.gz"
-	echo -e "VCF File\tTotal Markers" > filtering_marker_table.txt
-	for vcf in *; do
-		total_markers=$(bcftools stats "$vcf" | grep "number of records" | awk '{print $6}')
-		echo -e "${vcf}\t${total_markers}" >> filtering_marker_table.txt
-	done
-//	mv "${sample}_filt.vcf.gz" .
-//	mv filtering_marker_table.txt .
-	"""
+    bcftools view -i 'FORMAT/DP>${params.depth} && MAF > ${params.MAF} && F_MISSING<${params.missing}' ${vcf} -Oz -o DP_MAF_MISS_filter.vcf.gz
+    bcftools view -m2 -M2 -v snps DP_MAF_MISS_filter.vcf.gz -Oz -o  biallelic.vcf.gz
+    bcftools view -t "^UNKNOWN" biallelic.vcf.gz -Oz -o  "${sample}_filt.vcf.gz"
+    echo -e "VCF File\tTotal Markers" > filtering_marker_table.txt
+    for v in *.vcf.gz; do
+        total_markers=\$(bcftools stats "\$v" | grep "^SN" | grep "number of records" | awk '{print \$6}')
+        vcf_basename=\$(basename "\$v")
+        echo -e "\${vcf_basename}\t\${total_markers}" >> filtering_marker_table.txt
+    done
+    """
 }
 
 process gaston_clean {
@@ -148,7 +147,7 @@ process gaston_clean {
 }
 
 workflow {
-    Channel.fromPath(params.vcf_dir + '/*.vcf') \
+    Channel.fromPath(params.vcf_dir + '/*.vcf.gz') \
         .set { vcf_files }
 
 	bcftools_filter(vcf_files) |
