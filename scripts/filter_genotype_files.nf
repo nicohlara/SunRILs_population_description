@@ -152,10 +152,33 @@ process gaston_clean {
 	"""
 }
 
+process beagle_impute {
+    conda '/home/nicolas.lara/.conda/envs/imp_2'
+    publishDir "${params.output_dir}", mode: 'copy'
+
+    input:
+    path vcf
+
+    output: 
+    path "${sample}_imp"
+
+    script:
+    sample = vcf.baseName
+    """
+    bgzip ${vcf}
+    beagle gt=${vcf}.gz
+            out=${sample}_imp
+            map=/90daydata/guedira_seq_map/nico/SunRILs/HPC-GBS-Pipeline/SynOp_RIL906_v1.0_GBS_monotonic.map \
+            nthreads=40 \
+            window=350
+    """
+}
+
 workflow {
     Channel.fromPath(params.vcf_dir + '/*.vcf.gz')
         .set { vcf_files }
 
     bcftools_filter(vcf_files) | 
-        gaston_clean
+        gaston_clean |
+        beagle_impute
 }

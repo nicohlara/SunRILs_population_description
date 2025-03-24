@@ -19,13 +19,12 @@
 module load beagle
 
 
-cd /90daydata/guedira_seq_map/nico/SunRILs_adhoc
+cd /90daydata/guedira_seq_map/nico/SunFilt/output/
 
 echo "Begin imputation: $(date +"%Y-%m-%d %H:%M:%S")"
+#bgzip SunRILs_prod_filt2.vcf
 
-bgzip SunRILs_prod_filt2.vcf
-
-beagle gt=SunRILs_prod_filt2.vcf \
+beagle gt=SunRILs_prod_filt2.vcf.gz
             out=SunRILs_prod_filt_imp
 	    map=/90daydata/guedira_seq_map/nico/SunRILs/HPC-GBS-Pipeline/SynOp_RIL906_v1.0_GBS_monotonic.map \
             nthreads=40 \
