@@ -9,6 +9,8 @@ params.conda = '/home/nicolas.lara/.conda/envs/imputation'
 // directories
 params.vcf_dir = '/90daydata/guedira_seq_map/nico/SunFilt'
 params.output_dir = '/90daydata/guedira_seq_map/nico/SunFilt/output'
+params.pop_table = '/project/guedira_seq_map/nico/SunRILs_population_description/data/cross_info.csv'
+
 
 // BCFtools filtering parameters
 params.depth = '1'
@@ -78,6 +80,11 @@ process gaston_clean {
 	##rename lines
 	geno@ped\$id <- sub("\\\\:.*", "", geno@ped\$id)
 	geno@ped\$famid <- ifelse(grepl("UX", geno@ped\$id), sub("\\\\-.*", "", geno@ped\$id), "Parent")
+    tags <- c("-SMTISSUE", "-NWG", "-A+", "-A-")
+    genotype@ped\$id <- gsub(paste0("\\\\b(", paste0(tags, collapse="|"), ")\\\\b"), "", genotype@ped\$id)
+
+    ##UX1999 and UX2031 are the same family with switched parents
+    genotype@ped\$id <- gsub("UX1999", "UX2031", genotype@ped\$id)
 	
     consensus_info <- function(column) {
 	  non_na_values <- column[!is.na(column)]
@@ -174,11 +181,60 @@ process beagle_impute {
     """
 }
 
+process extract_samples {
+    input:
+    path vcf
+    path pop_table
+
+    output:
+    tuple path("sample_lists"), path("${sample}_list.txt")
+
+    script:
+    """
+    # Extract sample names from the VCF file header
+    bcftools query -l ${vcf} > all_samples.txt
+
+    # For each population, subset out the population samples and parents
+    while read population parent_1 parent_2; do
+        grep "^${population}-" all_samples.txt > "${population}_list.txt"
+        echo "${parent_1}" >> "${population}_list.txt"
+        echo "${parent_2}" >> "${population}_list.txt"
+    done < ${pop_table}
+
+    # Create output list files for each population
+    """
+}
+
+process subset_vcf {
+    input:
+    tuple path(sample_list), path(vcf)
+
+    output:
+    path "${sample}_subset.vcf.gz"
+
+    script:
+    """
+    # Subset the original VCF file by the sample list for each population
+    bcftools view -S ${sample_list} ${vcf} -Oz -o ${sample}_subset.vcf.gz
+    """
+}
+
+
+
 workflow {
     Channel.fromPath(params.vcf_dir + '/*.vcf.gz')
         .set { vcf_files }
 
-    bcftools_filter(vcf_files) | 
-        gaston_clean |
-        beagle_impute
+    vcf_raw = bcftools_filter(vcf_files) | 
+        gaston_clean
+
+    
+    beagle_impute(vcf_raw)
+
+    sample_lists = extract_samples(vcf: vcf_raw, pop_table = file(params.pop_table))
+
+    sample_lists.into { sample_files}
+    sample_files.map {sample_list -> 
+        subset_vcf(sample_list: sample_list, vcf: vcf_file)
+    }    
 }
