@@ -17,7 +17,7 @@ genotype <- read.vcf("data/SunRILs_prod_filt_imp.vcf.gz", convert.chr=F)
 ##take smallest biparental and get proportion of whole pop
 ##then multiply by reasonable MAF for F4 genotyped individuals
 table(blues$Cross_ID)
-MAF_threshold <- (110/sum(table(blues$Cross_ID)))*0.5^4 
+MAF_threshold <- (110/sum(table(blues$Cross_ID)))*0.5
 
 ##filter genotype by entries in blues file
 # genotype <- select.inds(genotype, id %in% blues$Entry) 

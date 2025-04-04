@@ -58,3 +58,15 @@ for (trait in c("flowering", "Height", "Powdery_mildew", "WDR")) {
   if (exists("BLINK_table")) {BLINK_table  <- rbind(BLINK_table , gtable)} else {BLINK_table  <- gtable}
 }
 write.table(BLINK_table, "outputs/gapit_blink_gwas.tsv", quote=F, sep="\t", row.names=F)
+
+
+## run Farm-CPU model
+for (trait in c("flowering", "Height", "Powdery_mildew", "WDR")) {
+  blu <- blues[,c("Taxa", trait)]
+  gapit <- GAPIT(Y = blu, GD = geno, GM = geno_map, model= "FarmCPU", file.output=F)
+  gtable <- filter(gapit$GWAS, P.value <= bonf_threshold)
+  gtable$trait <- trait
+  gtable$model <- "FarmCPU"
+  if (exists("FarmCPU_table")) {FarmCPU_table  <- rbind(FarmCPU_table , gtable)} else {FarmCPU_table  <- gtable}
+}
+write.table(FarmCPU_table, "outputs/gapit_farmcpu_gwas.tsv", quote=F, sep="\t", row.names=F)

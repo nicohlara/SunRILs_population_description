@@ -16,7 +16,7 @@ genotype <- read.vcf("data/SunRILs_prod_filt_imp.vcf.gz", convert.chr=F)
 ##take smallest biparental and get proportion of whole pop
 ##then multiply by reasonable MAF for F4 genotyped individuals
 table(blues$Cross_ID)
-MAF_threshold <- (110/sum(table(blues$Cross_ID)))*0.5^4 
+MAF_threshold <- (110/sum(table(blues$Cross_ID)))*0.5
 
 ##filter genotype by entries in blues file
 genotype <- select.inds(genotype, id %in% blues$Entry)
@@ -52,8 +52,7 @@ for (trait in c("flowering", "Height", "Powdery_mildew", "WDR")) {
   gwas$p.value <- 10^-gwas$p.value
   gwas <- filter(gwas, p.value <= bonf_threshold)
   gwas$trait <- trait
-  if (exists("GWAS_table")) {GWAS_table <- rbind(GWAS_table, gwas)} else {GWAS_table <- gwas}
+  if (exists("rrBLUP_table")) {rrBLUP_table <- rbind(rrBLUP_table, gwas)} else {rrBLUP_table <- gwas}
 }
 
-# GWAS_table$p.value <- 10^-GWAS_table$p.value
-write.table(GWAS_table, "outputs/rrBLUP_gwas.tsv", quote=F, sep="\t", row.names=F)
+write.table(rrBLUP_table, "outputs/rrBLUP_gwas.tsv", quote=F, sep="\t", row.names=F)
