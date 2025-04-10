@@ -8,19 +8,17 @@ nextflow.enable.dsl=2
 params.conda = '/home/nicolas.lara/.conda/envs/imputation'
 // directories
 params.vcf_dir = '/90daydata/guedira_seq_map/nico/SunFilt'
-params.output_dir = '/90daydata/guedira_seq_map/nico/SunFilt/output'
+params.output_dir = '/90daydata/guedira_seq_map/nico/SunFilt/20250410_filter'
 params.pop_table = '/project/guedira_seq_map/nico/SunRILs_population_description/data/cross_info.csv'
-
 
 // BCFtools filtering parameters
 params.depth = '1'
-params.MAF = '0.02'
-params.missing = '0.2'
+params.MAF = '0.01'
+params.missing = '0.5'
 
 // Gaston filtering parameters
 params.hz = '0.2'
 params.missing_line = '0.6'
-
 
 process bcftools_filter {
     conda '/home/nicolas.lara/.conda/envs/imp_2'
@@ -33,8 +31,8 @@ process bcftools_filter {
     tuple path("${vcf.baseName}_filt.vcf.gz"), path("filtering_marker_table.txt")
 	
     script:
-    sample = vcf.baseName
-
+//    sample = vcf.baseName
+    sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
     """
     bcftools view -i 'FORMAT/DP > ${params.depth} && MAF > ${params.MAF} && F_MISSING < ${params.missing}' ${vcf} -Oz -o DP_MAF_MISS_filter.vcf.gz
     bcftools view -m2 -M2 -v snps DP_MAF_MISS_filter.vcf.gz -Oz -o biallelic.vcf.gz
@@ -59,10 +57,11 @@ process gaston_clean {
     tuple path(vcf), path(table)
 
     output:
-    tuple path("${sample}_filt2.vcf.gz"), path("filtering_marker_table.txt")
+    tuple path("${sample}_filt2.vcf"), path("filtering_marker_table.txt")
 	
     script:
-    sample = vcf.baseName
+//    sample = vcf.baseName
+    sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
     """
     #!/usr/bin/env Rscript
 	library(gaston)
@@ -80,11 +79,11 @@ process gaston_clean {
 	##rename lines
 	geno@ped\$id <- sub("\\\\:.*", "", geno@ped\$id)
 	geno@ped\$famid <- ifelse(grepl("UX", geno@ped\$id), sub("\\\\-.*", "", geno@ped\$id), "Parent")
-    tags <- c("-SMTISSUE", "-NWG", "-A+", "-A-")
-    genotype@ped\$id <- gsub(paste0("\\\\b(", paste0(tags, collapse="|"), ")\\\\b"), "", genotype@ped\$id)
+    tags <- c("-SMTISSUE", "-NWG", "-A+", "-A-", "+")
+    geno@ped\$id <- gsub(paste0("\\\\b(", paste0(tags, collapse="|"), ")\\\\b"), "", geno@ped\$id)
 
     ##UX1999 and UX2031 are the same family with switched parents
-    genotype@ped\$id <- gsub("UX1999", "UX2031", genotype@ped\$id)
+    geno@ped\$id <- gsub("UX1999", "UX2031-99", geno@ped\$id)
 	
     consensus_info <- function(column) {
 	  non_na_values <- column[!is.na(column)]
@@ -127,7 +126,7 @@ process gaston_clean {
 						 REF=geno@snps\$A1,
 						 ALT=geno@snps\$A2,
 						 QUAL=gsub("0", ".", geno@snps\$quality),
-						 FILTER=geno@snps\$chr,
+						 FILTER="PASS",
 						 INFO=paste0("QualityScore=", geno@snps\$quality),
 						 FORMAT="GT")
 
@@ -154,7 +153,7 @@ process gaston_clean {
 
 	vcf_body_head <- paste0("#", paste(colnames(vcf_df), collapse="\t"))
 	vcf_output <- c(vcf_head, vcf_body_head, vcf_body)
-	writeLines(vcf_output, "${sample}_filt2.vcf.gz")
+	writeLines(vcf_output, "${sample}_filt2.vcf")
 	write.table(comp_table, file="filtering_marker_table.txt", quote=F, sep="\t", row.names=F)
 	"""
 }
@@ -162,19 +161,23 @@ process gaston_clean {
 process beagle_impute {
     conda '/home/nicolas.lara/.conda/envs/imp_2'
     publishDir "${params.output_dir}", mode: 'copy'
+    memory '100 GB'
+    time '24h'
+
 
     input:
     path vcf
 
     output: 
-    path "${sample}_imp"
+    path "${sample}_imp.vcf.gz"
 
     script:
-    sample = vcf.baseName
+//    sample = vcf.baseName
+    sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
     """
     bgzip ${vcf}
-    beagle gt=${vcf}.gz
-            out=${sample}_imp
+    beagle gt=${vcf}.gz \
+            out=${sample}_imp \
             map=/90daydata/guedira_seq_map/nico/SunRILs/HPC-GBS-Pipeline/SynOp_RIL906_v1.0_GBS_monotonic.map \
             nthreads=40 \
             window=350
@@ -182,59 +185,58 @@ process beagle_impute {
 }
 
 process extract_samples {
+    publishDir params.output_dir, mode: 'copy'
+    conda '/home/nicolas.lara/.conda/envs/imp_2'
+
     input:
-    path vcf
-    path pop_table
+    path vcf         // Input VCF file
+    path pop_table   // Population table file
 
     output:
-    tuple path("sample_lists"), path("${sample}_list.txt")
+    path "*.vcf.gz"
 
     script:
     """
+    bgzip ${vcf}
     # Extract sample names from the VCF file header
-    bcftools query -l ${vcf} > all_samples.txt
+    bcftools query -l ${vcf}.gz > all_samples.txt
 
+
+    ##set internal field separator to comma
+    IFS=","
     # For each population, subset out the population samples and parents
-    while read population parent_1 parent_2; do
-        grep "^${population}-" all_samples.txt > "${population}_list.txt"
-        echo "${parent_1}" >> "${population}_list.txt"
-        echo "${parent_2}" >> "${population}_list.txt"
+    while read Cross_ID Parent_1 Parent_2; do
+        grep "^\${Cross_ID}-" all_samples.txt > "\${Cross_ID}_list.txt"
+        echo "\${Parent_1}" >> "\${Cross_ID}_list.txt"
+        echo "\${Parent_2}" >> "\${Cross_ID}_list.txt"
+        bcftools view -S \${Cross_ID}_list.txt ${vcf}.gz -Oz -o \${Cross_ID}_subset.vcf.gz
     done < ${pop_table}
-
-    # Create output list files for each population
     """
 }
-
-process subset_vcf {
-    input:
-    tuple path(sample_list), path(vcf)
-
-    output:
-    path "${sample}_subset.vcf.gz"
-
-    script:
-    """
-    # Subset the original VCF file by the sample list for each population
-    bcftools view -S ${sample_list} ${vcf} -Oz -o ${sample}_subset.vcf.gz
-    """
-}
-
-
 
 workflow {
     Channel.fromPath(params.vcf_dir + '/*.vcf.gz')
         .set { vcf_files }
+    Channel.fromPath(params.pop_table)
+	.set { pop_table }
+
 
     vcf_raw = bcftools_filter(vcf_files) | 
-        gaston_clean
+	gaston_clean
 
-    
-    beagle_impute(vcf_raw)
+    imp_vcf = vcf_raw.map { it[0] }
+    beagle_impute(imp_vcf)
 
-    sample_lists = extract_samples(vcf: vcf_raw, pop_table = file(params.pop_table))
 
-    sample_lists.into { sample_files}
-    sample_files.map {sample_list -> 
-        subset_vcf(sample_list: sample_list, vcf: vcf_file)
-    }    
+    // Extract sample names and create sample lists
+    sample_lists = extract_samples(imp_vcf, pop_table)
+
+//    subset_vcf(sample_lists, vcf_raw)
+
+    // Subset VCF based on sample lists
+//    sample_lists.into { sample_files }
+ //   sample_files.map { sample_list ->
+  //      subset_vcf(sample_list, vcf_file)
+   // }
 }
+
