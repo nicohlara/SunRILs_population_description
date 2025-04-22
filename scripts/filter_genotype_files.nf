@@ -8,17 +8,21 @@ nextflow.enable.dsl=2
 params.conda = '/home/nicolas.lara/.conda/envs/imputation'
 // directories
 params.vcf_dir = '/90daydata/guedira_seq_map/nico/SunFilt'
-params.output_dir = '/90daydata/guedira_seq_map/nico/SunFilt/20250410_filter'
+params.output_dir = '/90daydata/guedira_seq_map/nico/SunFilt/20250414_filter'
 params.pop_table = '/project/guedira_seq_map/nico/SunRILs_population_description/data/cross_info.csv'
 
 // BCFtools filtering parameters
-params.depth = '1'
+params.depth = '3'
+params.quality = '20'
 params.MAF = '0.01'
-params.missing = '0.5'
+params.missing = '0.4'
 
 // Gaston filtering parameters
 params.hz = '0.2'
-params.missing_line = '0.6'
+params.missing_line = '0.5'
+
+// create output directory
+new File(params.output_dir).mkdirs()
 
 process bcftools_filter {
     conda '/home/nicolas.lara/.conda/envs/imp_2'
@@ -28,14 +32,15 @@ process bcftools_filter {
     path vcf
 
     output:
-    tuple path("${vcf.baseName}_filt.vcf.gz"), path("filtering_marker_table.txt")
+    tuple path("${sample}_filt.vcf.gz"), path("filtering_marker_table.txt")
 	
     script:
 //    sample = vcf.baseName
     sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
     """
-    bcftools view -i 'FORMAT/DP > ${params.depth} && MAF > ${params.MAF} && F_MISSING < ${params.missing}' ${vcf} -Oz -o DP_MAF_MISS_filter.vcf.gz
+    bcftools view -i 'FORMAT/DP > ${params.depth} && 'FORMAT/GQ' >= ${params.quality} && MAF > ${params.MAF} && F_MISSING < ${params.missing}' ${vcf} -Oz -o DP_MAF_MISS_filter.vcf.gz
     bcftools view -m2 -M2 -v snps DP_MAF_MISS_filter.vcf.gz -Oz -o biallelic.vcf.gz
+    bcftools index -c biallelic.vcf.gz
     bcftools view -t "^UNKNOWN" biallelic.vcf.gz -Oz -o "${sample}_filt.vcf.gz"
 
     ##create table of marker numbers
