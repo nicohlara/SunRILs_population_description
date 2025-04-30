@@ -186,25 +186,86 @@ for (fam in pedigree$Cross_ID) {
 }
 
 ## ROUND 1 CLEAN
-decisions <- read.delim("linkage_map/map1_decisions.csv", sep=",")
-
 map_clean <- function(decision_row) {
   row_data <- decision_row[-c(1,25)]
   row_data <- row_data[!is.na(row_data)]
+  row_data <- gsub("\\*", "", row_data)
   groups <- unlist(strsplit(paste0(row_data, collapse="|"), "|", fixed=TRUE))
   groups <- as.integer(groups[groups != ""])
-  fam <- decisions[1,1]
+  fam <- decision_row[,1]
   dir <- glue("linkage_map/{fam}_map")
   map <- read.table(glue("{dir}/{fam}_map1"))
   map$group <- ifelse(map$group %in% groups, map$group, NA)
+  merge_groups <- grep("\\|", row_data, value=T)
+  for (p in merge_groups) {
+    split_pair <- as.numeric(strsplit(p, "\\|")[[1]])
+    nums <- map$group
+    nums[nums %in% split_pair] <- split_pair[1]
+    map$group <- nums
+  }
   return(map)
 }
 
-##UX1989
-map <- map_clean(decisions[1,])
-filter(map, group == 36) %>% arrange(cM_pos) ##appears that data is overlapping
-map_curve(filter(map, group == 36 & chr == "6A"))
-map$group <- ifelse(map$group == 36 & map$chr == '6A', 37, NA)
+decisions <- read.delim("linkage_map/chrom_decisions.txt", sep="\t")
+for (fam in pedigree$Cross_ID[-1]) {
+  dir <- glue("linkage_map/{fam}_map")
+  map  <- map_clean(decisions[decisions$Cross_ID == fam,])
+  vcf <- onemap_read_vcfR(vcf = glue("linkage_map/biparental_vcf/{fam}_subset.vcf.gz"),
+                          cross="ri self",
+                          parent1 = pedigree[pedigree$Cross_ID==fam, "Parent_1"],
+                          parent2 = pedigree[pedigree$Cross_ID==fam, "Parent_2"])
+  vcf_filt <- split_onemap(vcf, mks = map$marker)
+  twopts <- rf_2pts(input.obj = vcf_filt)
+  mapf <- map[!is.na(map$group),]
+  # chroms = list()
+  for (g in unique(mapf$group)) {
+    grp <- dplyr::filter(map, group == g)
+    n <- glue("S{names(sort(table(grp$chr), decreasing=T)[1])}")
+    markers <- as.integer(sapply(grp$marker, function(x) grep(x, colnames(twopts$data.name$geno))))
+    seq <- make_seq(twopts, markers)
+    seq_order <- order_seq(seq, touchdown=T)
+    seq_fin <- make_seq(seq_order, "force")
+    map_out <- data.frame(marker = colnames(seq_fin$data.name$geno)[seq_fin$seq.num],
+                          cM_pos = cumsum(c(0, kosambi(seq_fin$seq.rf))))
+    if (exists("map_fin")) {map_fin <- rbind(map_fin, map_out)} else {map_fin <- map_out}
+    
+  }
+  map_fin <- merge(map_fin, map[-3], by="marker", all=F)
+  plot_chroms_all(map_fin, cluster_map(map_fin, vcf_filt$n.mar), plot_name = glue("{dir}/{fam}_map1_cleaned.pdf"))
+  write.table(map_fin, file=glue("{dir}/{fam}_map1_clean"))
+  rm(map_fin)
+}
+  
+##convert to qtl2
+for (fam in pedigree$Cross_ID) {
+  dir <- glue("linkage_map/{fam}_map")
+  map <- read.table(glue("{dir}/{fam}_map1_clean")) %>%
+    select(marker, chr, cM_pos) %>%
+    arrange(chr, cM_pos)
+  vcfin <- readLines(glue("linkage_map/biparental_vcf/{fam}_subset.vcf.gz"))
+  head_end <- grep("#CHROM", vcfin)
+  
+  vcf <- data.frame(fread(text=vcfin[head_end:length(vcfin)]))
+  row.names(vcf) <- vcf$ID
+  vcf <- as.matrix(vcf[map$marker,10:ncol(vcf)])
+  vcf[vcf=="0/0"] <- "AA"
+  vcf[vcf=="1/1"] <- "BB"
+  vcf[vcf=="0/1"] <- "AB"
+  vcf[vcf=="./."] <- "-"
+  output = data.frame(genotype = c("", "", colnames(vcf)),
+                     index = c("", "", seq(1, ncol(vcf))))
+  content <- cbind(map, vcf)
+  rownames(content) <- content$marker
+  content <- t(content[-1])
+  content <- cbind(output, content)
+  content$genotype <- gsub("\\.", "-", content$genotype)
+  write.csv(content, glue("{dir}/{fam}_qtl2_map.csv"), quote=F, row.names=F)
+}  
+
+
+
+
+
 
 
 
