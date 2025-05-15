@@ -1,5 +1,6 @@
 ### Demonstration linkage map creation for a cross object
-## generally speaking, choosing two linkage groups per chromosome is not advised
+## generally speaking, choosing many linkage groups per chromosome is not advised.
+## There are some functions to try to stitch 2-3 together into one if possible. WIP
 
 
 ##install needed packages
