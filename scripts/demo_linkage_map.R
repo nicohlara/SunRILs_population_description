@@ -111,5 +111,5 @@ output_directory <- "linkage_map/maps/"
 final_map <- quickEst(final_map, map.function = "kosambi")
 print(summary.map(final_map))
 write.table(summary.map(final_map), file = glue("{output_directory}{fam}_stats.csv"), quote=F, row.names=T)
-plot_linkage_map(final_map, fam, file_path="{output_directory}")
+plot_linkage_map(final_map, fam, file_path=glue("{output_directory}"))
 write.cross(final_map, "csv", filestem=glue("{output_directory}{fam}_linkage_map"))
