@@ -96,7 +96,7 @@ pop_index <- data.frame(population = rev(rownames(k)),
 join_dataframe <- merge(join_dataframe, pop_index, by='population' )
 parent_order <- c("HILLIARD",
                   "GA00190-7A14",
-                  "AGS2000",
+                  "AGS2000",v 1.3.23
                   "ARGA051160-14LE31",
                   "GA001138-8E36",
                   "GA06493-13LE6",
@@ -359,3 +359,13 @@ ggplot(heatmap_data, aes(x = BinStart, y = Chromosome, fill = MarkerCount)) +
   scale_fill_viridis_c(option = "magma", trans = "sqrt") +
   labs(x = "Position (bp)", y = "Chromosome", fill = "Marker Count") +
   theme_minimal()
+
+
+###get average distance between markers
+average_distances <- genotype@snps %>%
+  arrange(chr, pos) %>%
+  group_by(chr) %>%
+  summarise(
+    avg_distance = mean(diff(pos)),
+    n_markers = n()
+  )
