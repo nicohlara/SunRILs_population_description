@@ -14,32 +14,33 @@ convert_vcf_to_cross <- function(geno, phenotype) {
   pheno <- phenotype %>% filter(genotype %in% row.names(geno))
   pheno <- merge(data.frame(genotype = row.names(geno)), pheno, by='genotype', all=T)
   pheno <- pheno[match(row.names(geno), pheno$genotype),]
-  marker_corr <- apply(geno, 2, function(marker) cor(marker, pheno$Height, use = "pairwise.complete.obs"))
-  flip_markers <- na.omit(names(marker_corr[marker_corr < -0.25]))
-  for (m in flip_markers) {
-    geno[, m] <- ifelse(is.na(geno[, m]), NA, 2 - geno[, m])  # flips 1 <-> 2
-  }
-  
+  # marker_corr <- apply(geno, 2, function(marker) cor(marker, pheno$Height, use = "pairwise.complete.obs"))
+  # flip_markers <- na.omit(names(marker_corr[marker_corr < -0.25]))
+  # for (m in flip_markers) {
+  #   geno[, m] <- ifelse(is.na(geno[, m]), NA, 2 - geno[, m])  # flips 1 <-> 2
+  # }
+  chrom <- sapply(strsplit(gsub("S", "", colnames(geno)), "_"), "[", 1)
   geno[geno==0] <- "A"
   geno[geno==1] <- "H"
   geno[geno==2] <- "B"
   geno[is.na(geno)] <- "-"
-  geno <- cbind(pheno[2:ncol(pheno)], geno)
-  
-  geno <- cbind(1:dim(geno)[1], geno)
-  colnames(geno)[1] <- "index"
-  geno <- rbind(c(rep("", ncol(pheno)),gaston_object@snps$chr), geno)
+  geno <- cbind(pheno[1], 1:dim(geno)[1], pheno[2:ncol(pheno)], geno)
+  colnames(geno)[2] <- "index"
+  geno <- rbind(c(rep("", ncol(pheno)+1),chrom), geno)
   rownames(geno)[1] <- ""
-  geno <- cbind(rownames(geno), geno)
-  colnames(geno)[1] <- 'genotype'
   return(geno)
 }  
 
-plot_chrom_curve <- function(cross_map, chrom) {
+plot_chrom_curve <- function(cross_map, chrom, zoom=F) {
   plot_frame <- data.frame(cM = cross_map$geno[[chrom]]$map,
                            pos = sapply(strsplit(names(cross_map$geno[[chrom]]$map), "_"), "[", 2))
   par(cex.axis=3, mar=c(5,4,0.5,0.5))
-  plot(plot_frame$cM, plot_frame$pos, ylim=c(1, 1e9), cex=3, pch = 20, xlab="cM", ylab="bp")
+  if (zoom==T) {
+    plot(plot_frame$cM, plot_frame$pos, cex=3, pch = 20, xlab="cM", ylab="bp")
+  } else {
+    plot(plot_frame$cM, plot_frame$pos, ylim=c(1, 1e9), cex=3, pch = 20, xlab="cM", ylab="bp")
+    
+  }
 }
 
 make_map <- function(map, p_value, min_markers = 10) {
@@ -92,14 +93,14 @@ extract_group <- function(chrom_name) {
   str_extract(chrom_name, "^[^\\.]+")
 }
 
-linkage_group_selector <- function(cross_map) {
+linkage_group_selector <- function(cross_map, zoom=F) {
   chromosomes <- names(cross_map$geno)
   chrom_groups <- unique(extract_group(chromosomes))
   chrom_by_group <- split(chromosomes, extract_group(chromosomes))
   
   for (chrom in chromosomes) {
     png(filename = file.path("www/plots", paste0(chrom, ".png")), width = 800, height = 600)
-    plot_chrom_curve(cross_map, chrom)
+    plot_chrom_curve(cross_map, chrom, zoom=zoom)
     dev.off()
   }
   

@@ -3,27 +3,31 @@ library(ggplot2)
 library(here)
 library(dplyr)
 library(ggrepel)
+library(data.table)
+library(GenomicRanges)
+library(rtracklayer)
+library(purrr)
 setwd(here())
 
 ##read in data
 chrom_sizes <- read.delim("data/chromosome_lengths.tsv")
 mapping <- paste0(rep(1:7, each=3), rep(LETTERS[c(1,2,4)], 7))
 asrgwas <- read.delim("outputs/asreml_gwas.tsv") %>%
-  rename(Position = pos, P.value = p.value) %>%
+  dplyr::rename(Position = pos, P.value = p.value) %>%
   mutate(Chromosome = match(chrom, mapping))
 asrgwas$model <- "ASRgwas"
 blink <- read.delim("outputs/gapit_blink_gwas.tsv")
 mlm <- read.delim("outputs/gapit_mlm_gwas.tsv")
 farmcpu <- read.delim("outputs/gapit_farmcpu_gwas.tsv")
 rrBLUP <- read.delim("outputs/rrBLUP_gwas.tsv") %>%
-  rename(Position = pos, P.value = p.value) %>%
+  dplyr::rename(Position = pos, P.value = p.value) %>%
   mutate(Chromosome = match(chr, mapping))
 rrBLUP$model <- "rrBLUP"
 qtl2_cim <- read.delim("outputs/qtl2_cim.tsv") 
 qtl2_cim <- qtl2_cim %>%
   mutate(P.value = 10^-lod, model = "qtl2_cim", Position = as.numeric(gsub("S.._", "", qtl2_cim$Pos))) %>%
   select(chr, Position, P.value, model, trait) %>% 
-  rename(Chromosome = chr) %>%
+  dplyr::rename(Chromosome = chr) %>%
   filter(P.value <= 10^-2)
 mlm_rerun <- read.delim("outputs/gapit_mlm_gwas_sig_markers_fixed.tsv")
 
@@ -47,11 +51,13 @@ traits <- list(flowering = 'HD',
 analysis$trait <- sapply(analysis$trait, function(x) if (x %in% names(traits)) traits[[x]] else x)
 analysis <- analysis %>% mutate(trait = factor(trait, levels=c("WDR", "HD", "PM", "Height")))
 
-write.table(analysis, "outputs/combined_GWAS.tsv", quote=F, sep="\t", row.names=F)
-
 ##subset down to more stringent marker set
 bonf_threshold <- (0.05 / 70000) ## total number of SNPs available
 analysis <- filter(analysis, P.value <= bonf_threshold)
+
+write.table(analysis, "outputs/combined_GWAS.tsv", quote=F, sep="\t", row.names=F)
+
+
 
 # analysis <- filter(analysis, model %in% c("MLM", "MLM_rerun"))
 ##plot figures
@@ -64,12 +70,7 @@ ggplot(analysis, aes(x = Position, y = -log10(P.value), color = model)) +
   scale_x_continuous(breaks=c(0, 4e8, 8e8), limits=c(0, 1e9))
 
 
-##create table for presenting
-library(dplyr)
-library(data.table)
-library(GenomicRanges)
-library(rtracklayer)
-library(purrr)
+
 
 # Prepare your data
 assoc <- analysis %>%
@@ -100,7 +101,7 @@ assign_peak_groups <- function(df, group_distance = 1e6) {
 peaks_clustered <- assoc %>%
   group_by(trait, chromosome) %>%
   group_split() %>%
-  map_df(assign_peak_groups, group_distance = 3e7)
+  map_df(assign_peak_groups, group_distance = 1e7)
 
 # Summarize peaks
 peak_summary <- data.table(peaks_clustered)[, {
@@ -119,6 +120,15 @@ peak_summary <- data.table(peaks_clustered)[, {
 write.table(peak_summary, "outputs/peaks.tsv", quote=F, row.names=F, sep="\t")
 
 peak_summary <- dplyr::filter(data.frame(peak_summary), model_count > 1)
+
+ggplot(peak_summary, aes(x = pos_peak, y = LOD, color = trait)) +
+  geom_point(size=1.5) +
+  facet_grid(trait ~ chromosome, scales="free_y") +
+  labs(x = "Position", y = "-log10(P.value)", color = "Model") +
+  theme_bw() +
+  theme(panel.spacing = unit(0, "lines"), axis.text.x = element_text(angle = 60, hjust = 1)) +
+  scale_x_continuous(breaks=c(0, 4e8, 8e8), limits=c(0, 1e9))
+
 
 qtl_gr <- GRanges(
   seqnames = paste0("Chr", peak_summary$chromosome),

@@ -1,6 +1,6 @@
 ###making final figures for the population manuscript
 ##Nicolas Lara
-##Last edit: 2025-4-16
+##Last edit: 2025-5-19
 
 library(here)
 library(tidyverse)
@@ -354,12 +354,13 @@ heatmap_data <- bins %>%
   mutate(Chromosome = factor(Chromosome, levels = rev(unique(Chromosome))))
 
 # Plot
-ggplot(heatmap_data, aes(x = BinStart, y = Chromosome, fill = MarkerCount)) +
+marden <- ggplot(heatmap_data, aes(x = BinStart, y = Chromosome, fill = MarkerCount)) +
   geom_tile(height = 0.9) +
-  scale_fill_viridis_c(option = "magma", trans = "sqrt") +
+  scale_fill_viridis_c(option = "magma", trans = "log2") +
   labs(x = "Position (bp)", y = "Chromosome", fill = "Marker Count") +
   theme_minimal()
-
+marden
+ggsave("figures/marker_density.png", plot = marden, width = 8, height = 3)
 
 ###get average distance between markers
 average_distances <- genotype@snps %>%

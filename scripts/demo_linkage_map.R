@@ -57,15 +57,16 @@ final_map <- subset(map1, keep)
 summaryMap <- summary.map(map1)
 remove <- rownames(summaryMap)[-grep(paste(sapply(strsplit(keep, "\\."), "[", 1), collapse = "|"), rownames(summaryMap))]
 map2 <- subset(SunCross4, chr=unique(head(gsub("\\..*", "", remove), -1)))
-map2 <- make_map(map2, p_value = 1e-15)
+map2 <- make_map(map2, p_value = 1e-19)
 keep2 <- linkage_group_selector(map2)
 final_map2 <- subset(map2, keep2)
+final_map2$pheno <- final_map2$pheno[1]
 final_map <- combineMap(final_map, final_map2, id='genotype')
 
 ## finalize map, rename linkage groups, join or flip chroms, rogue out markers etc.
 ## flips chromosomes
-to_flip <- linkage_group_selector(final_map)
-final_map2 <- flip.order(final_map, c(to_flip))
+to_flip <- linkage_group_selector(final_map, zoom=T)
+if (length(to_flip) > 0) {final_map2 <- flip.order(final_map, c(to_flip))} else {final_map2 <- final_map}
 
 ## join linkage groups.
 ##NEED TO SELECT IN ORDER WITHIN EACH CHROMOSOMAL GROUP
@@ -73,7 +74,7 @@ final_map2 <- flip.order(final_map, c(to_flip))
 ## often results in VERY long chromosomes
 filter <- TRUE
 max_distance <- 500
-to_join <- linkage_group_selector(final_map)
+to_join <- linkage_group_selector(final_map2)
 final_map3 <- final_map2
 for (grp in unique(gsub("\\..*", "",to_join))) {
   L <- list()
@@ -82,6 +83,7 @@ for (grp in unique(gsub("\\..*", "",to_join))) {
   final_map4 <- mergeCross(final_map3, merge = L)
   if (filter == TRUE) {
     distance <- summary.map(quickEst(final_map4, chr = grp, map.function = "kosambi"))[grp, 'length']
+    print(distance)
     if (distance < max_distance) {final_map3 <- final_map4}
   } else {
     final_map3 <- final_map4
@@ -102,15 +104,25 @@ for (chr in chrnames(final_map3)) {
 length(markers_to_remove)
 final_map4 <- drop.markers(final_map3, markers_to_remove)
 
-##select final linkage groups
-final_map5 <- linkage_group_selector(final_map4)
-final_map <- subset(final_map4, final_map5)
+##select final linkage groups in order
+final_chroms <- linkage_group_selector(final_map4)
+final_map5 <- subset(final_map4, final_chroms)
+final_map5$geno <- final_map5$geno[final_chroms]
+
+df <- data.frame(original = final_chroms) %>%
+  mutate(base = str_extract(original, "^[^\\.]+")) %>%  # extract base before dot
+  group_by(base) %>%
+  mutate(new = if (n() == 1) base else paste0(base, ".", row_number())) %>%
+  ungroup()
+
+names(final_map5$geno) <- df$new
 
 ##re-estimate distances, print stats, and save plots, stats, and the map
 output_directory <- "linkage_map/maps/"
 ## this gives pretty bad results with stitched linkage groups
-final_map <- quickEst(final_map, map.function = "kosambi")
+final_map <- quickEst(final_map5, map.function = "kosambi")
 print(summary.map(final_map))
 write.table(summary.map(final_map), file = glue("{output_directory}{fam}_stats.csv"), quote=F, row.names=T)
 plot_linkage_map(final_map, fam, file_path=glue("{output_directory}"))
 write.cross(final_map, "csv", filestem=glue("{output_directory}{fam}_linkage_map"))
+
