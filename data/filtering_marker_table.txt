@@ -1,0 +1,7 @@
+VCF.File	Total.Markers
+biallelic.vcf.gz	97617
+DP_MAF_MISS_filter.vcf.gz	105794
+SunRILs_production_filt.vcf.gz	95843
+SunRILs_production.vcf.gz	637072
+gaston_filter	70498
+gaston_consensus	70498

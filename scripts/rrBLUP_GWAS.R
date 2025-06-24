@@ -1,4 +1,4 @@
-## run GWAS using ASRgwas package
+## run GWAS using rrBLUP package
 ## Nicolas A. H. Lara
 
 library(here)
@@ -38,7 +38,7 @@ blues <- filter(blues, Entry %in% genotype@ped$id) %>%
 
 bonf_threshold <- (0.1 / ncol(genotype))
 
-for (trait in c("flowering", "Height", "Powdery_mildew", "WDR")) {
+for (trait in colnames(blues)[-c(1:2)]) {
   ##preprocess for gwas
   pheno <- blues[,c("Genotype", trait)]
   gwas <- rrBLUP::GWAS(pheno=pheno,
