@@ -33,10 +33,18 @@ for (fam in pedigree$Cross_ID) {
   write.csv(cross, glue("linkage_map/cross_objects/{fam}_rqtl.csv"), row.names=FALSE)
 }
 
+# ## full dataset for monotonic map
+# vcf <- read.vcf("data/sunRILs_production_filt_filt2.vcf.gz", convert.chr =FALSE)
+# vcf@ped$id <- gsub("UX2031-99-", "UX2031-99", vcf@ped$id)
+# genotype <- as.data.frame(as.matrix(vcf), stringAsFactors = F) 
+# cross <- convert_vcf_to_cross(genotype, blues)
+# write.csv(cross, glue("linkage_map/SunRILs_rqtl.csv"), row.names=FALSE)
+
+
+
 filter <- data.frame(popmiss = c(30, 30, 22.5, 27.5, 20, 25, 30, 25, 25, 27.5, 27.5, 30, 25, 25, 35),
                      markmiss = c(0.5, .5, .65, .6, .55, .65, .4, .5, .55, .8, .75, .7, .7, .75, .7))
 rownames(filter) <- pedigree$Cross_ID
-
 
 ##filter down the markers
 for (fam in pedigree$Cross_ID) {
@@ -64,7 +72,29 @@ for (fam in pedigree$Cross_ID) {
   print("")
   write.cross(SunCross4, "csv", filestem=glue("linkage_map/filt_premap/{fam}_filtered"))
 }
-
+# 
+# 
+# ## full dataset for monotonic map
+# pop_missing <- 25700
+# miss_threshold <- .55
+# SunCross<- read.cross(format="csv",file=glue("linkage_map/SunRILs_rqtl.csv"),
+#                       estimate.map=FALSE, na.strings=c("-","NA"),
+#                       genotypes=c("A","H","B"), crosstype="riself")
+# ##filter by individuals
+# pg <- profileGen(SunCross, bychr=F, stat.type=c("miss", "dxo", "xo"), id = 'genotype')
+# # hist(pg$stat$miss)
+# SunCross1 <- subsetCross(SunCross, ind = c(pg$stat$miss < pop_missing))
+# ##filter by markers
+# nt.bymar <- ntyped(SunCross1, 'mar')
+# # hist(nt.bymar/length(SunCross1$pheno$genotype))
+# ###Aiming for ~4k markers with >100 markers per chromosome
+# SunCross2 <- drop.markers(SunCross1, names(nt.bymar[nt.bymar < length(SunCross$pheno$genotype)*(miss_threshold)]))
+# SunCross3<-pullCross(SunCross2,type="co.located")
+# pm <- profileMark(SunCross3, stat.type = c("seg.dist"), crit.val =
+#                     "bonf", type = "l", cex = 0.25)
+# SunCross4 <- drop.markers(SunCross3, rownames(pm$marker[pm$marker$crit.val == FALSE,]))
+# print(c(totmar(SunCross), totmar(SunCross1), totmar(SunCross2), totmar(SunCross3), totmar(SunCross4)))
+# write.cross(SunCross4, "csv", filestem=glue("linkage_map/SunRILs_filtered"))
 
 # power <- data.frame(p1 = c(10, 14, 12, 10, 10, 10, 10, 10, 6, 10, 10, 10, 10, 10, 10),
                     # p2 = c(NA, 22, NA, NA, 15, 15, NA, NA, 15, 15, NA, NA, 25, NA, NA))
@@ -74,12 +104,15 @@ stats <- list()
 ##make maps
 for (fam in pedigree$Cross_ID[-c(1:7)]) {
   print(fam)
-  SunCross<- read.cross(format="csv",file=glue("linkage_map/filt_premap/{fam}_filtered.csv"),
+  SunCross<- read.cross(format="csv",file="linkage_map/SunRILs_filtered.csv",
                         estimate.map=FALSE, na.strings=c("-","NA"),
                         genotypes=c("AA","H","BB"), crosstype="riself")
-  ##create map
+  # SunCross <-  read.cross(format="csv",file=glue("linkage_map/filt_premap/{fam}_filtered.csv"),
+  #                         estimate.map=FALSE, na.strings=c("-","NA"),
+  #                         genotypes=c("AA","H","BB"), crosstype="riself")
+  # ##create map
   print("Choose chromosomes")
-  p1 <- as.numeric(readline("First p-value? 10^-n"))
+  p1 <- as.numeric(readline("First p-value? 10^-n "))
   map1 <- make_map(SunCross, p_value = 10^-p1)
   keep <- linkage_group_selector(map1)
   final_map <- subset(map1, keep)

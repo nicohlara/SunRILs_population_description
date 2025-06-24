@@ -23,12 +23,6 @@ rrBLUP <- read.delim("outputs/rrBLUP_gwas.tsv") %>%
   dplyr::rename(Position = pos, P.value = p.value) %>%
   mutate(Chromosome = match(chr, mapping))
 rrBLUP$model <- "rrBLUP"
-qtl2_cim <- read.delim("outputs/qtl2_cim.tsv") 
-qtl2_cim <- qtl2_cim %>%
-  mutate(P.value = 10^-lod, model = "qtl2_cim", Position = as.numeric(gsub("S.._", "", qtl2_cim$Pos))) %>%
-  select(chr, Position, P.value, model, trait) %>% 
-  dplyr::rename(Chromosome = chr) %>%
-  filter(P.value <= 10^-2)
 mlm_rerun <- read.delim("outputs/gapit_mlm_gwas_sig_markers_fixed.tsv")
 
 
@@ -41,7 +35,6 @@ analysis <- rbind(mlm[,c("Chromosome", "Position", "P.value", "model", "trait")]
            rrBLUP[,c("Chromosome", "Position", "P.value", "model", "trait")],
            mlm_rerun[,c("Chromosome", "Position", "P.value", "model", "trait")])
 analysis$Chromosome <- mapping[mapping=analysis$Chromosome]
-analysis <- rbind(analysis, qtl2_cim)
 
 
 ##process
@@ -70,9 +63,7 @@ ggplot(analysis, aes(x = Position, y = -log10(P.value), color = model)) +
   scale_x_continuous(breaks=c(0, 4e8, 8e8), limits=c(0, 1e9))
 
 
-
-
-# Prepare your data
+## group markers into peaks
 assoc <- analysis %>%
   dplyr::rename(chromosome = Chromosome, position = Position, p.value = P.value) %>%
   arrange(trait, chromosome, position) %>%
@@ -98,41 +89,49 @@ assign_peak_groups <- function(df, group_distance = 1e6) {
 }
 
 # Apply to each (trait, model, chromosome) group
-peaks_clustered <- assoc %>%
-  group_by(trait, chromosome) %>%
-  group_split() %>%
-  map_df(assign_peak_groups, group_distance = 1e7)
+# for (gd  in c(1e7, 3e7, 5e7, 7e7, 9e7)) {
+gd <- 3e7
+  peaks_clustered <- assoc %>%
+    group_by(trait, chromosome) %>%
+    group_split() %>%
+    map_df(assign_peak_groups, group_distance = gd)
+  
+  # Summarize peaks
+  peak_summary <- data.table(peaks_clustered)[, {
+    min_p <- min(p.value)
+    peak_pos <- position[which.min(p.value)]
+    .(
+      # chromosome = data.table::first(chromosome),
+      peak_start = min(position),
+      peak_end = max(position),
+      LOD = -log10(min_p),
+      LOD_peak = peak_pos,
+      model_count = uniqueN(model),
+      nmar = uniqueN(position)
+    )
+  }, by = .(trait, chromosome, peak_group)]
+  # print(gd); print(nrow(peak_summary)); print(table(peak_summary$nmar))
+# }
 
-# Summarize peaks
-peak_summary <- data.table(peaks_clustered)[, {
-  min_p <- min(p.value)
-  peak_pos <- position[which.min(p.value)]
-  .(
-    chromosome = data.table::first(chromosome),
-    pos_min = min(position),
-    pos_max = max(position),
-    LOD = -log10(min_p),
-    pos_peak = peak_pos,
-    model_count = uniqueN(model)
-  )
-}, by = .(trait, chromosome, peak_group)]
-
+peak_summary <- dplyr::select(peak_summary, -c(peak_group))
 write.table(peak_summary, "outputs/peaks.tsv", quote=F, row.names=F, sep="\t")
+# peak_summary <- dplyr::filter(data.frame(peak_summary), model_count > 1)
+# table(dplyr::filter(data.frame(peak_summary), model_count > 1)$trait)
 
-peak_summary <- dplyr::filter(data.frame(peak_summary), model_count > 1)
-
-ggplot(peak_summary, aes(x = pos_peak, y = LOD, color = trait)) +
+gwas <- ggplot(data.frame(peak_summary), aes(x = LOD_peak, y = LOD, color = trait)) +
   geom_point(size=1.5) +
   facet_grid(trait ~ chromosome, scales="free_y") +
   labs(x = "Position", y = "-log10(P.value)", color = "Model") +
   theme_bw() +
   theme(panel.spacing = unit(0, "lines"), axis.text.x = element_text(angle = 60, hjust = 1)) +
   scale_x_continuous(breaks=c(0, 4e8, 8e8), limits=c(0, 1e9))
+ggsave("figures/gwas.png", plot = gwas, width = 12, height = 4)
 
+range_padding <- 10e6
 
 qtl_gr <- GRanges(
   seqnames = paste0("Chr", peak_summary$chromosome),
-  ranges = IRanges(start = peak_summary$pos_min, end = peak_summary$pos_max),
+  ranges = IRanges(start = peak_summary$peak_start-range_padding, end = peak_summary$peak_end + range_padding),
   trait = peak_summary$trait
   )
 
@@ -146,7 +145,7 @@ overlaps <- findOverlaps(qtl_gr, genes)
 # Combine QTL and gene info
 qtl_gene_matches <- data.table(
   trait = as.character(mcols(qtl_gr)$trait[queryHits(overlaps)]),
-  peak_chr = as.character(seqnames(qtl_gr)[queryHits(overlaps)]),
+  chromosome = as.character(seqnames(qtl_gr)[queryHits(overlaps)]),
   peak_start = start(qtl_gr)[queryHits(overlaps)],
   peak_end = end(qtl_gr)[queryHits(overlaps)],
   gene_id = as.character(mcols(genes)$ID[subjectHits(overlaps)]),
@@ -154,41 +153,48 @@ qtl_gene_matches <- data.table(
   gene_start = start(genes)[subjectHits(overlaps)],
   gene_end = end(genes)[subjectHits(overlaps)]#,
   # gene_name = if ("Name" %in% names(mcols(genes))) as.character(mcols(genes)$Name[subjectHits(overlaps)]) else NA
-) %>% unique()
+) %>% unique() %>%
+  mutate(chromosome = gsub("Chr", "", chromosome))
 
+output_QTL_summary <- merge(peak_summary, qtl_gene_matches, by=c("trait", "chromosome", "peak_start", "peak_end"), all=T)
+
+
+##import various sources of gene info
 gene_names <- read.delim("data/iwgsc_refseqv2.1_geneID_names.txt") %>%
-  dplyr::rename(gene_id = Gene.stable.ID) %>%
+  dplyr::rename(gene_id = Gene.stable.ID, IWGSC_description = Gene.description) %>%
   select(-"Source..gene.")
-named_gene_qtl <- merge(qtl_gene_matches, gene_names, by=c("gene_id")) %>%
-  filter(!(Gene.name == "")) %>%
-  mutate(peak_chr = gsub('Chr', "", peak_chr)) %>%
-  dplyr::rename(pos_min = peak_start, pos_max = peak_end, chromosome = peak_chr) %>%
-  select(-c(Gene.description))
-
 TGT_gene_desc <- read.delim("data/TGT_GDTable_20250508230759.csv", sep=",") %>%
-  dplyr::rename(gene_id = Gene, TGT_description = Description)
-named_gene_qtl <- merge(named_gene_qtl, TGT_gene_desc, by=c("gene_id"))
+  dplyr::rename(gene_id = Gene, TGT_description = Description) %>%
+  dplyr::select(-c(Location, Expression))
 
-output_QTL_summary <- merge(peak_summary, named_gene_qtl, by=c("trait", "chromosome", "pos_min", "pos_max"), all=T, allow.cartesian=T) %>%
-  dplyr::select(-c(peak_group, chromosome.1, Expression))
-write.table(output_QTL_summary, "outputs/qtl_peaks_gene_names.tsv", quote=F, row.names=F, sep="\t")
+gene_names <- merge(gene_names, TGT_gene_desc, by=c("gene_id"), all=T)
+
+##merge into named and unnamed gene ranges
+named_gene_qtl <- merge(qtl_gene_matches, gene_names, by=c("gene_id"), all=T) %>%
+  filter(!(Gene.name == "") & !(trait == "")) %>%
+  mutate(peak_start = round(peak_start/1e6, 1), peak_end = round(peak_end/1e6, 1)) %>%
+  arrange(trait, chromosome, gene_start)
+unnamed_gene_qtl <- merge(qtl_gene_matches, gene_names, by=c("gene_id"), all=T) %>%
+  filter((Gene.name == "") & !(trait == ""))
+write.table(named_gene_qtl, "outputs/named_qtl_peak_genes.tsv", quote=F, row.names=F, sep="\t")
 
 ##generate lollipop plot for publication
 qtl_data <- output_QTL_summary %>%
-  dplyr::select(trait, chromosome, pos_peak, LOD, Gene.name, gene_start, gene_end) %>%
-  dplyr::rename(peak_position = pos_peak, lod = LOD, gene = Gene.name) %>%
+  dplyr::select(trait, chromosome, LOD_peak, LOD) %>%
   dplyr::mutate(chromosome = factor(chromosome, levels = unique(sort(chromosome))),
-                trait = factor(trait), # Optional for grouping color
-                peak_position = round(peak_position/1e6, 1),
-                gene_start = round(gene_start/1e6, 1),
-                gene_end = round(gene_end/1e6, 1),
-                lod = round(lod, 1),
+                trait = factor(trait, levels = c("WDR", "HD", "PM", "Height")), # Optional for grouping color
+                LOD_peak = round(LOD_peak/1e6, 1),
+                LOD = round(LOD, 1),
                 ) %>%
+  filter(!(is.na(LOD_peak))) %>% 
   unique()
 
-qtl_subset_data <- qtl_data %>% dplyr::filter(!is.na(gene)) %>%
-  dplyr::select(chromosome, gene_start, gene_end, gene) %>%
-  unique()
+gene_data <- read.delim("outputs/peaks_annotated.csv", sep=",") %>% 
+  dplyr::filter(!(is.na(gene_start))) %>% 
+  dplyr::select(chromosome, gene_start, gene_end, Gene, Status) %>%
+  mutate(gene_start = gene_start/1e6, gene_end = gene_end/1e6, text_color = ifelse(Status == "Present", "#000000", "#888888")) %>%
+  unique() 
+  
 
 ##import chromosome sizes
 chrom_sizes_mb <- chrom_sizes %>%
@@ -198,15 +204,16 @@ chrom_sizes_mb <- chrom_sizes %>%
 
 
 # Create the lollipop plot
-ggplot(qtl_data, aes(x = peak_position, y = chromosome)) +
+lolli <- ggplot(qtl_data, aes(x = LOD_peak, y = chromosome)) +
   geom_segment(data = chrom_sizes_mb,
                aes(x = Start, xend = End, y = Chromosome, yend = Chromosome),
                color = "gray90", size = 5) +
-  geom_point(data = qtl_data, aes(x = gene_start, y = chromosome), color = 'black', size = 4, pch = '|') +
-  geom_text_repel(data = qtl_subset_data,
-            aes(x = gene_start, y = chromosome, label = gene),
+  geom_point(data = gene_data, aes(x = gene_start, y = chromosome), color = gene_data$text_color, size = 4, pch = '|') +
+  geom_text_repel(data = gene_data,
+            aes(x = gene_start, y = chromosome, label = Gene),
+            color=gene_data$text_color,
             size = 3, max.overlaps=nrow(qtl_data)) +
-  geom_point(aes(color = trait, size = lod)) +
+  geom_point(aes(color = trait, size = LOD)) +
   scale_size_continuous(range = c(2, 6)) +
   labs(
     x = "Position on Chromosome (Mb)",
@@ -220,3 +227,44 @@ ggplot(qtl_data, aes(x = peak_position, y = chromosome)) +
     axis.text.y = element_text(size = 10),
     legend.position = "right"
   )
+lolli
+ggsave("figures/gene_lollipop.png", plot = lolli, width = 8, height = 5)
+
+
+##compare to CIM results
+qtl2_cim <- read.delim("outputs/qtl2_cim.tsv") 
+qtl2_cim <- filter(qtl2_cim, lod >= -log10(0.25 / 995))
+qtl2_cim <- qtl2_cim %>%
+  mutate(P.value = 10^-lod, model = "qtl2_cim", Position = as.numeric(gsub("S.._", "", qtl2_cim$Pos))) %>%
+  select(chr, Position, P.value, model, trait, cross) %>% 
+  dplyr::rename(Chromosome = chr) %>%
+  arrange(Chromosome, Position)
+##group into peaks
+cim_assoc <- qtl2_cim %>%
+  arrange(trait, Chromosome, Position) %>% 
+  setDT
+cim_peaks <- qtl2_cim %>%
+  arrange(trait, Chromosome, Position) %>%
+  dplyr::rename(position = Position) %>% 
+  setDT %>%
+  group_by(trait, Chromosome) %>%
+  group_split() %>%
+  map_df(assign_peak_groups, group_distance = 5e7)
+cim_summary <- data.table(cim_peaks)[, {
+  min_p <- min(P.value)
+  peak_pos <- position[which.min(P.value)]
+  .(
+    peak_start = min(position),
+    peak_end = max(position),
+    LOD = -log10(min_p),
+    LOD_peak = peak_pos,
+    pop_count = uniqueN(cross),
+    pops = paste(sort(unique(cross)), collapse=", "),
+    nmar = uniqueN(position)
+  )
+}, by = .(trait, Chromosome, peak_group)]
+cim_summary %>% select(-c(peak_group, nmar, pop_count)) %>%
+  mutate(peak_start = round(peak_start/1e6,1), peak_end=round(peak_end/1e6, 1), 
+         LOD_peak=round(LOD_peak/1e6), LOD=round(LOD/1e6)) %>%
+  filter(trait == 'PM') %>%
+  data.frame()

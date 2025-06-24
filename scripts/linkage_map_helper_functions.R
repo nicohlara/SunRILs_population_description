@@ -39,7 +39,6 @@ plot_chrom_curve <- function(cross_map, chrom, zoom=F) {
     plot(plot_frame$cM, plot_frame$pos, cex=3, pch = 20, xlab="cM", ylab="bp")
   } else {
     plot(plot_frame$cM, plot_frame$pos, ylim=c(1, 1e9), cex=3, pch = 20, xlab="cM", ylab="bp")
-    
   }
 }
 

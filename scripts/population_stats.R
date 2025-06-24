@@ -7,8 +7,9 @@ library(tidyverse)
 library(gaston)
 library(popkin)
 library(asreml)
-# library(ASRgenomics)
+library(ASRgenomics)
 library(yarrr)
+# library(AGHmatrix)
 
 setwd(here())
 
@@ -96,7 +97,7 @@ pop_index <- data.frame(population = rev(rownames(k)),
 join_dataframe <- merge(join_dataframe, pop_index, by='population' )
 parent_order <- c("HILLIARD",
                   "GA00190-7A14",
-                  "AGS2000",v 1.3.23
+                  "AGS2000",
                   "ARGA051160-14LE31",
                   "GA001138-8E36",
                   "GA06493-13LE6",
@@ -264,7 +265,8 @@ h2 <- function(pheno_file, trait, kinship) {
   print(level_num)
   fix.formula <- as.formula(paste0(trait, '~', 1))
   variance <- asreml(fixed = fix.formula,
-                     random = ~vm(Entry, kinship) + Location:Year,
+                     random = ~vm(Entry, kinship) + Env,
+                     residual = ~idv(units),
                      data=pheno_file,
                      workspace="8gb")
   print(summary(variance)$varcomp)
@@ -284,11 +286,13 @@ phenotype <- phenotype %>%
          row = as.factor(row), column = as.factor(column)) %>%
   dplyr::filter(Year %in% years & Cross_ID %in% pedigree$Cross_ID, Location %in% locations) %>%
   dplyr::select(all_of(c(effect_variables, traits$trait))) %>%
-  rename(HD = flowering, PM = Powdery_mildew)
+  dplyr::rename(HD = flowering, PM = Powdery_mildew)
 
 g <- select.inds(genotype, id %in% phenotype$Entry)
 # kinship <- gaston::GRM(g, autosome.only=F, chunk = 10)
 kinship <- G.matrix(M = as.matrix(g), method="VanRaden")$G
+ki <- solve(kinship)
+pheno_file <- filter(phenotype, Entry %in% genotype@ped$id)
 
 h2_df <- data.frame()
 traits <- colnames(phenotype)[-c(1:6)]
@@ -298,6 +302,22 @@ for (trait in traits) {
   
 }
 write.csv(h2_df, "outputs/trait_heritability.csv", row.names=F)
+
+
+
+for (env in unique(pheno_file$Year)) {
+  a <- filter(pheno_file, Year == env)
+  variance <- asreml(fixed = Height ~ 1,
+                     random = ~vm(Entry, kinship) + Env,
+                     residual = ~idv(units),
+                     data=a,
+                     workspace="8gb")
+  print(env)
+  print(summary(variance)$varcomp)
+  print(asreml::vpredict(variance, herit ~ V2 / (V1 + V2 + V3)))
+  print("")
+}
+
 
 
 
