@@ -1,42 +1,47 @@
 nextflow.enable.dsl=2
 
-params.vcf_files = "data/*.vcf.gz"
-params.output_dir = "results/merged"
-params.chromosomes = ["1A", "1B", "1D", "2A", "2B", "2D", "3A", "3B", "3D", "4A", "4B", "4D", "5A", "5B", "5D", "6A", "6B", "6D", "7A", "7B", "7D"]
+params.basedir = "project/guedira_seq_map/nico/SunRILs_population_description"
+params.vcf_files = "${params.basedir}/data/raw_vcf"
+params.population_table = "${params.basedir}/data/cross_info.csv"
+params.output_dir = "${params.basedir}/data/processed_vcf"
+params.monotonic_maps = "${params.basedir}/linkage_map/monotonic"
 // bcftools filtering parameters
 params.depth = '3'
 params.quality = '20'
 
-workflow {
-    // Create output directory
-    new File(params.output_dir).mkdirs()
+Channel
+    .from(splitted_vcfs)
+    .map { file -> 
+        def cross_id = file.getBaseName().split('_')[1]
+        tuple(cross_id, file)
+    }
+    .groupTuple()
 	
-    Channel.fromPath('path/to/*.vcf.gz')
+workflow {
+    // Collect input VCFs
+    Channel.fromPath("${params.vcf_files}/*.vcf.gz")
         .set { raw_vcfs }
 
-    // Step 1: preprocess
-    preprocessed = bcftools_filter(raw_vcfs)
+    // Broadcast the population table for pairing
+    Channel.value(file(params.population_table))
+        .set { pop_table_ch }
 
-    // Step 2: split per chromosome
-    split_by_chr = split_by_subpop(preprocessed) |
-		split_vcf_by_chr
-
-	final_collection = merge_and_dedup(split_by_chr)
-	
-	pop_files = concat_chromosomes(final_collection)
-	
-	gwas_file = concat_subpops(pop_files)
+    // Step 1: Filter and split
+    raw_vcfs
+        | bcftools_filter
+        | combine(pop_table_ch)
+        | split_by_subpop
+        | groupTupleBySubpop()
+        | merge_and_dedup
+        | beagle_impute
 }
 
 process bcftools_filter {
-    conda '/home/nicolas.lara/.conda/envs/imp_2'
-    publishDir params.output_dir, mode: 'copy'
-
     input:
     path vcf
 
     output:
-    tuple path("${sample}_filt.vcf.gz"), path("filtering_marker_table.txt")
+    tuple path("${sample}_filt.vcf.gz")
 	
     script:
     sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
@@ -45,7 +50,7 @@ process bcftools_filter {
     bcftools view -m2 -M2 -v snps DP_MAF_MISS_filter.vcf.gz -Oz -o biallelic.vcf.gz
     bcftools index -c biallelic.vcf.gz
     bcftools view -t "^UNKNOWN" biallelic.vcf.gz -Oz -o "${sample}_filt.vcf.gz"
-
+    
     ##create table of marker numbers
     echo -e "VCF File\tTotal Markers" > filtering_marker_table.txt
     for vcf in *.vcf.gz; do
@@ -57,22 +62,17 @@ process bcftools_filter {
 }
 
 process split_by_subpop {
-    publishDir params.output_dir, mode: 'copy'
-    conda '/home/nicolas.lara/.conda/envs/imp_2'
-
     input:
-    path vcf         // Input VCF file
-    path pop_table   // Population table file
+    tuple val(cross_id), path(vcf_files)
 
     output:
-    path "*.vcf.gz"
-
+	tuple val(cross_id), path("${sample}_${cross_id}_filt.vcf.gz")
+	
     script:
+    sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
     """
-    bgzip ${vcf}
     # Extract sample names from the VCF file header
-    bcftools query -l ${vcf}.gz > all_samples.txt
-
+    bcftools query -l ${vcf} > all_samples.txt
 
     ##set internal field separator to comma
     IFS=","
@@ -81,27 +81,28 @@ process split_by_subpop {
         grep "^\${Cross_ID}-" all_samples.txt > "\${Cross_ID}_list.txt"
         echo "\${Parent_1}" >> "\${Cross_ID}_list.txt"
         echo "\${Parent_2}" >> "\${Cross_ID}_list.txt"
-        bcftools view -S \${Cross_ID}_list.txt ${vcf}.gz -Oz -o \${Cross_ID}_subset.vcf.gz
+        bcftools view -S \${Cross_ID}_list.txt ${vcf}.gz -Oz -o \${sample}_${Cross_ID}_subset.vcf.gz
     done < ${pop_table}
     """
 }
 
 process merge_and_dedup {
     input:
-    tuple val(chrom), path(files)
-
-    output:
-    path("merged_${chrom}.tsv")
+	tuple val(cross_id), path(vcf_files)
+    
+	output:
+    tuple val(cross_id), path("${cross_id}_dedup.vcf")
 	
 	script:
 	"""
+	#!/usr/bin/env Rscript
 	library(data.table)
 	library(glue)
 	library(dplyr)
 	
-	##read in chrom VCFs as table
-	m1 = data.frame(fread(cmd=glue("gzip -dc data/raw_vcf/{geno_list[1]} | grep -v '^##'")))
-	m2 = data.frame(fread(cmd=glue("gzip -dc data/raw_vcf/{geno_list[2]} | grep -v '^##'")))
+	##read in subpop VCFs as table
+	m1 = data.frame(fread(cmd=glue("gzip -dc data/raw_vcf/{vcf1} | grep -v '^##'")))
+	m2 = data.frame(fread(cmd=glue("gzip -dc data/raw_vcf/{vcf2} | grep -v '^##'")))
 	m1[setdiff(colnames(m2), colnames(m1))] <- NA
 	m2[setdiff(colnames(m1), colnames(m2))] <- NA
 	m3 <- rbind(m1, m2[colnames(m1)])
@@ -150,45 +151,28 @@ process merge_and_dedup {
 	m1_header <- m1_header[1:(grep("#CHROM", m1_header)-1)]
 	m3_body_header <- paste0("#", paste(colnames(m3_new), collapse="\t"))
 	vcf_output <- c(m1_header, m3_body_header, m3_new)
-	writeLines(vcf_output, "${sample}_dedup.vcf")	
+	writeLines(vcf_output, "${cross_id}_dedup.vcf")	
 	"""
 }
 
 process beagle_impute {
-    conda '/home/nicolas.lara/.conda/envs/imp_2'
     publishDir "${params.output_dir}", mode: 'copy'
     memory '100 GB'
     time '24h'
 
-
     input:
-    path vcf
+	tuple val(cross_id), path(vcf)
 
     output: 
-    path "${sample}_imp.vcf.gz"
+    path "${cross_id}_imp.vcf.gz"
 
     script:
-\    sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
     """
     bgzip ${vcf}
     beagle gt=${vcf}.gz \
-            out=${sample}_imp \
-            map=/project/guedira_seq_map/nico/SunRILs_population_description/linkage_map/monotonic/fam_GBS_monotonic.map \
+            out=${cross_id}_imp \
+            map=${params.monotonic}/${cross_id}_GBS_monotonic.map \
             nthreads=40 \
             window=350
-    """
-}
-
-process concat_subpops {
-//not written yet
-	input:
-    path(tsv_files)
-
-    output:
-    path("${params.output_dir}/final_merged.tsv")
-
-    script:
-    """
-    cat \$(ls merged_*.tsv | sort) > ${params.output_dir}/final_merged.tsv
     """
 }
