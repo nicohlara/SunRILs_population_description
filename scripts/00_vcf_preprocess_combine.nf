@@ -4,7 +4,7 @@ params.basedir = "/project/guedira_seq_map/nico/SunRILs_population_description"
 params.vcf_files = "${params.basedir}/data/raw_vcf"
 params.population_table = "${params.basedir}/data/cross_info.csv"
 params.output_dir = "${params.basedir}/data/processed_vcf"
-params.monotonic_maps = "${params.basedir}/linkage_map/monotonic"
+params.monotonic = "${params.basedir}/linkage_map/monotonic"
 // bcftools filtering parameters
 params.depth = '3'
 params.quality = '20'
@@ -40,18 +40,20 @@ workflow {
         .groupTuple()
 
     // Step 5: Split into paired and singleton Cross_IDs
-    split_map = grouped_subpop_vcfs.branch (
-        paired:    { cross_id, files -> files.size() == 2 },
-        singleton: { cross_id, files -> files.size() == 1 }
-    )
+    paired_ch = grouped_subpop_vcfs
+        .filter { cross_id, files -> files.size() == 2 }
+
+    singleton_ch = grouped_subpop_vcfs
+        .filter { cross_id, files -> files.size() == 1 }
 
     // Step 6a: Merge and deduplicate
-    deduped_vcfs = split_map.paired 
+    deduped_vcfs = paired_ch 
         .map { cross_id, files -> tuple(cross_id, files[0], files[1]) }
         | merge_and_dedup
+        | compress_vcf
 
     // Step 6b: Pass singleton files directly
-    singleton_passthrough = split_map.paired
+    singleton_passthrough = singleton_ch
         .map { cross_id, files -> tuple(cross_id, files[0]) }
 
     // Step 7: Beagle imputation
@@ -182,6 +184,20 @@ process merge_and_dedup {
 	"""
 }
 
+process compress_vcf {
+    input:
+    tuple val(cross_id), path(vcf)
+
+    output:
+    tuple val(cross_id), path("${vcf}.gz")
+
+    script:
+    """
+    bgzip ${vcf}
+    """
+}
+
+
 process beagle_impute {
     publishDir "${params.output_dir}", mode: 'copy'
     memory '100 GB'
@@ -195,8 +211,8 @@ process beagle_impute {
 
     script:
     """
-    bgzip ${vcf}
-    beagle gt=${vcf}.gz \
+    #bgzip ${vcf}
+    beagle gt=${vcf} \
             out=${cross_id}_imp \
             map=${params.monotonic}/${cross_id}_GBS_monotonic.map \
             nthreads=40 \
