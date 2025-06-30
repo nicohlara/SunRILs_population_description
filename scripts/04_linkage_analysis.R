@@ -409,15 +409,24 @@ for (fam in pedigree$Cross_ID) {
   }
   lm <- lm %>% mutate(chrom = sapply(strsplit(chrom, "\\."), "[", 1))
   ##enforce cM/pos order
-  lm_mono <- lm %>%
-    arrange(chrom, cM) %>%
-    group_by(chrom) %>%
-    mutate(diff = c(NA, diff(pos))) %>%
-    filter(is.na(diff) | diff >= 0) %>%
-    select(-diff) %>%
-    ungroup()
+  lm_mono <- lm 
+  diff <- 1
+  while (diff > 0) {
+    r1 <- nrow(lm_mono)
+    lm_mono <- lm_mono %>%
+      arrange(chrom, cM) %>%
+      group_by(chrom) %>%
+      mutate(diffp = c(NA, diff(pos)),
+             diffc = c(NA, diff(cM))) %>%
+      filter(is.na(diffp) | is.na(diffc) | diffp > 0 | diffc > 0) %>%
+      select(-c(diffp, diffc)) %>%
+      ungroup()
+    diff <- r1-nrow(lm_mono)
+    print(glue("{r1}, {diff}"))
+  }
   write.table(lm_mono, glue("linkage_map/monotonic/{fam}_GBS_monotonic.map"), quote=F, sep="\t", row.names=F, col.names=F)
 }
+
 
 ##add missing chromosomes in to monotonic maps
 map_files <- list.files("linkage_map/monotonic", pattern = "_GBS_monotonic.map$", full.names = TRUE)
@@ -427,7 +436,8 @@ all_maps <- map_df(map_files, ~ {
 })
 
 monotonic_consensus <- data.frame()
-for (chr in paste0(rep(1:7, each=3), rep(c("A", "B", "D"), 7))) {
+chroms <- paste0(rep(1:7, each=3), rep(c("A", "B", "D"), 7))
+for (chr in chroms) {
   chr_filter <- filter(all_maps, chrom == chr)
   path <- marker_path_selector(select(chr_filter, cM, pos), chr)
   path$chrom <- chr
@@ -435,3 +445,17 @@ for (chr in paste0(rep(1:7, each=3), rep(c("A", "B", "D"), 7))) {
 }
 monotonic_consensus <- select(monotonic_consensus, c(chrom, cM, pos))
 write.table(monotonic_consensus, "linkage_map/monotonic/consensus_GBS_monotonic.map", quote=F, sep="\t", row.names=F, col.names=F)
+
+for (fam in pedigree$Cross_ID) {
+  map <- read.table(glue("linkage_map/monotonic/{fam}_GBS_monotonic.map"), header=F, col.names= c("chrom", "marker", "cM", "pos"))
+  for (chr in chroms) {
+    if (!(chr %in% map$V1)) {
+      add <- monotonic_consensus[monotonic_consensus$chrom == chr,] %>%
+        mutate(marker = glue("S{chrom}_{pos}")) %>%
+        select(chrom, marker, cM, pos)
+      map <- rbind(map, add)
+    }
+  }
+  write.table(map, glue("linkage_map/monotonic/{fam}_GBS_monotonic.map"), quote=F, sep="\t", row.names=F, col.names=F)
+  
+}
