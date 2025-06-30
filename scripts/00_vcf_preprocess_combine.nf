@@ -1,6 +1,6 @@
 nextflow.enable.dsl=2
 
-params.basedir = "project/guedira_seq_map/nico/SunRILs_population_description"
+params.basedir = "/project/guedira_seq_map/nico/SunRILs_population_description"
 params.vcf_files = "${params.basedir}/data/raw_vcf"
 params.population_table = "${params.basedir}/data/cross_info.csv"
 params.output_dir = "${params.basedir}/data/processed_vcf"
@@ -9,31 +9,56 @@ params.monotonic_maps = "${params.basedir}/linkage_map/monotonic"
 params.depth = '3'
 params.quality = '20'
 
-Channel
-    .from(splitted_vcfs)
-    .map { file -> 
-        def cross_id = file.getBaseName().split('_')[1]
-        tuple(cross_id, file)
-    }
-    .groupTuple()
-	
 workflow {
-    // Collect input VCFs
+    new File(params.output_dir).mkdirs()
+
+    // Load input VCFs
     Channel.fromPath("${params.vcf_files}/*.vcf.gz")
         .set { raw_vcfs }
 
-    // Broadcast the population table for pairing
+    // Broadcast population table
     Channel.value(file(params.population_table))
         .set { pop_table_ch }
 
     // Step 1: Filter and split
-    raw_vcfs
-        | bcftools_filter
-        | combine(pop_table_ch)
-        | split_by_subpop
-        | groupTupleBySubpop()
+    filtered_vcfs = bcftools_filter(raw_vcfs)
+
+    // Step 2: Combine each filtered VCF with the population table
+    vcf_with_pop_table = filtered_vcfs.combine(pop_table_ch)
+
+    // Step 3: Split filtered VCFs by subpopulations
+    subpop_vcfs = split_by_subpop(vcf_with_pop_table)
+        .flatten()
+        .map { file -> 
+            def cross_id = file.getBaseName().tokenize("_")[-2]
+            tuple(cross_id, file)
+        }
+
+    // Step 4: Group subset VCFs by Cross_ID
+    grouped_subpop_vcfs = subpop_vcfs
+        .map { cross_id, file -> tuple(cross_id, file) }
+        .groupTuple()
+
+    // Step 5: Split into paired and singleton Cross_IDs
+    split_map = grouped_subpop_vcfs.branch (
+        paired:    { cross_id, files -> files.size() == 2 },
+        singleton: { cross_id, files -> files.size() == 1 }
+    )
+
+    // Step 6a: Merge and deduplicate
+    deduped_vcfs = split_map.paired 
+        .map { cross_id, files -> tuple(cross_id, files[0], files[1]) }
         | merge_and_dedup
+
+    // Step 6b: Pass singleton files directly
+    singleton_passthrough = split_map.paired
+        .map { cross_id, files -> tuple(cross_id, files[0]) }
+
+    // Step 7: Beagle imputation
+    deduped_vcfs
+        .mix(singleton_passthrough)
         | beagle_impute
+
 }
 
 process bcftools_filter {
@@ -41,7 +66,7 @@ process bcftools_filter {
     path vcf
 
     output:
-    tuple path("${sample}_filt.vcf.gz")
+    path "${sample}_filt.vcf.gz"
 	
     script:
     sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
@@ -62,11 +87,13 @@ process bcftools_filter {
 }
 
 process split_by_subpop {
+    errorStrategy 'ignore'
+
     input:
-    tuple val(cross_id), path(vcf_files)
+    tuple path(vcf), path(pop_table)
 
     output:
-	tuple val(cross_id), path("${sample}_${cross_id}_filt.vcf.gz")
+    path("*.vcf.gz")
 	
     script:
     sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
@@ -81,16 +108,16 @@ process split_by_subpop {
         grep "^\${Cross_ID}-" all_samples.txt > "\${Cross_ID}_list.txt"
         echo "\${Parent_1}" >> "\${Cross_ID}_list.txt"
         echo "\${Parent_2}" >> "\${Cross_ID}_list.txt"
-        bcftools view -S \${Cross_ID}_list.txt ${vcf}.gz -Oz -o \${sample}_${Cross_ID}_subset.vcf.gz
+        bcftools view -S \${Cross_ID}_list.txt ${vcf} --force-samples -Oz -o ${sample}_\${Cross_ID}_subset.vcf.gz
     done < ${pop_table}
     """
 }
 
 process merge_and_dedup {
     input:
-	tuple val(cross_id), path(vcf_files)
+    tuple val(cross_id), path(vcf1), path(vcf2)
     
-	output:
+    output:
     tuple val(cross_id), path("${cross_id}_dedup.vcf")
 	
 	script:
@@ -161,7 +188,7 @@ process beagle_impute {
     time '24h'
 
     input:
-	tuple val(cross_id), path(vcf)
+    tuple val(cross_id), path(vcf)
 
     output: 
     path "${cross_id}_imp.vcf.gz"
