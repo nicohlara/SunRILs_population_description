@@ -10,6 +10,7 @@ library(ggplot2)
 library(gaston)
 library(stringr)
 library(tidyr)
+source("scripts/linkage_map_helper_functions.R")
 
 setwd(here())
 
@@ -391,14 +392,15 @@ ggplot(peak_summary, aes(x = chromosome, y = cross_label, fill = AA)) +
 ggsave(file="figures/QTL_heatmap_chromArm.png", width=12, height=5)
 
 
-## generate monotonic maps from crosses
+## generate initial monotonic maps from crosses
+# base_map <- read.delim("data/SynOp_RIL906_v1.0_GBS_monotonic.map", header=F)
 for (fam in pedigree$Cross_ID) {
   linkagemap <- read.delim(glue("linkage_map/maps/{fam}_linkage_map_conv.csv"), sep=",")
   linkagemap <- linkagemap[1:2, 7:ncol(linkagemap)]
   lm <- data.frame(chrom = as.character(linkagemap[1,]),
                    marker = colnames(linkagemap),
                    cM = round(as.numeric(linkagemap[2,]), 2),
-                   pos = sapply(strsplit(colnames(linkagemap), "_"), "[", 2))
+                   pos = as.numeric(sapply(strsplit(colnames(linkagemap), "_"), "[", 2)))
   
   chroms_to_convert <- unique(sapply(strsplit(grep("\\.", unique(lm$chrom), value=T), "\\."), "[", 1))
   for (chr in chroms_to_convert) {
@@ -406,5 +408,30 @@ for (fam in pedigree$Cross_ID) {
     lm <- lm %>% mutate(cM = ifelse(chrom==glue("{chr}.2"), cM+add, cM))
   }
   lm <- lm %>% mutate(chrom = sapply(strsplit(chrom, "\\."), "[", 1))
-  write.table(lm, glue("linkage_map/monotonic/{fam}_GBS_monotonic.map"), quote=F, sep="\t", row.names=F, col.names=F)
+  ##enforce cM/pos order
+  lm_mono <- lm %>%
+    arrange(chrom, cM) %>%
+    group_by(chrom) %>%
+    mutate(diff = c(NA, diff(pos))) %>%
+    filter(is.na(diff) | diff >= 0) %>%
+    select(-diff) %>%
+    ungroup()
+  write.table(lm_mono, glue("linkage_map/monotonic/{fam}_GBS_monotonic.map"), quote=F, sep="\t", row.names=F, col.names=F)
 }
+
+##add missing chromosomes in to monotonic maps
+map_files <- list.files("linkage_map/monotonic", pattern = "_GBS_monotonic.map$", full.names = TRUE)
+all_maps <- map_df(map_files, ~ {
+  read_tsv(.x, col_names = c("chrom", "marker", "cM", "pos")) %>%
+    mutate(source = basename(.x))
+})
+
+monotonic_consensus <- data.frame()
+for (chr in paste0(rep(1:7, each=3), rep(c("A", "B", "D"), 7))) {
+  chr_filter <- filter(all_maps, chrom == chr)
+  path <- marker_path_selector(select(chr_filter, cM, pos), chr)
+  path$chrom <- chr
+  monotonic_consensus <- rbind(monotonic_consensus, path)
+}
+monotonic_consensus <- select(monotonic_consensus, c(chrom, cM, pos))
+write.table(monotonic_consensus, "linkage_map/monotonic/consensus_GBS_monotonic.map", quote=F, sep="\t", row.names=F, col.names=F)

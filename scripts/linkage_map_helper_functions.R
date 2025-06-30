@@ -5,6 +5,8 @@ library(stringr)
 library(glue)
 library(shiny)
 library(plotly)
+library("ggplot2")
+library(pracma)
 
 ###notes:
 ##selection apps should open in browser. When done press 'Done' at bottom of page, then page can be exited and results used
@@ -220,4 +222,76 @@ lasso_marker_selector <- function(cross, chr) {
   runApp(shinyApp(ui, server), launch.browser = TRUE)
   
   return(env$selected_markers)
+}
+
+
+marker_path_selector <- function(df, chr_label = NULL) {
+  stopifnot(all(c("cM", "pos") %in% colnames(df)))
+  
+  env <- new.env()
+  env$path_df <- NULL
+  
+  ui <- fluidPage(
+    h4(if (!is.null(chr_label)) paste("Trace a path on chromosome", chr_label) else "Trace a path"),
+    plotlyOutput("plot", height = "600px"),
+    fluidRow(
+      column(4, actionButton("undo", "Undo Last Point")),
+      column(4, actionButton("clear", "Clear All")),
+      column(4, actionButton("done", "Done"))
+    ),
+    verbatimTextOutput("status")
+  )
+  
+  server <- function(input, output, session) {
+    values <- reactiveValues(path = data.frame(cM = numeric(0), pos = numeric(0)))
+    
+    observeEvent(event_data("plotly_click", source = "plot_click"), {
+      click <- event_data("plotly_click", source = "plot_click")
+      if (!is.null(click)) {
+        values$path <- rbind(values$path, data.frame(cM = click$x, pos = click$y))
+      }
+    })
+    
+    observeEvent(input$undo, {
+      if (nrow(values$path) > 0) {
+        values$path <- values$path[-nrow(values$path), ]
+      }
+    })
+    
+    observeEvent(input$clear, {
+      values$path <- data.frame(cM = numeric(0), pos = numeric(0))
+    })
+    
+    output$plot <- renderPlotly({
+      plt <- ggplot(df, aes(x = cM, y = pos)) +
+        geom_point(alpha = 0.4) +
+        geom_path(data = values$path, aes(x = cM, y = pos), color = "blue", linewidth = 1.5) +
+        geom_point(data = values$path, aes(x = cM, y = pos), color = "blue", size = 2) +
+        theme_minimal()
+      
+      ggplotly(plt, source = "plot_click") %>%
+        layout(dragmode = "click")
+    })
+    
+    output$status <- renderPrint({
+      cat("Path points:", nrow(values$path))
+    })
+    
+    observeEvent(input$done, {
+      if (nrow(values$path) < 2) {
+        env$path_df <- NULL
+        stopApp()
+      } else {
+        path <- values$path
+        cM_seq <- seq(min(path$cM), max(path$cM), by = 10)
+        interp_pos <- interp1(path$cM, path$pos, cM_seq, method = "linear")
+        env$path_df <- data.frame(cM = cM_seq, pos = interp_pos)
+        stopApp()
+      }
+    })
+  }
+  
+  runApp(shinyApp(ui, server), launch.browser = TRUE)
+  
+  return(env$path_df)
 }
