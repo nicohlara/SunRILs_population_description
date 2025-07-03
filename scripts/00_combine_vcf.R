@@ -214,7 +214,7 @@ dup_samp <- names(dup_samp[dup_samp>1])
 m3_orig <- m3[!(m3$ID %in% dup_samp),]
 
 get_consensus_call <- function(sample) {
-  calls <- tstrsplit(grep("\\./\\.", sample[[1]], invert = TRUE, value = TRUE), ":")
+  calls <- tstrsplit(grep("\\./\\.", sample, invert = TRUE, value = TRUE), ":")
   if (length(calls) == 0) {return(sample[[1]][1])}
   GT <- names(sort(table(calls[1]), decreasing=T))[1]
   GT_pos <- grep(GT, calls[[1]])
@@ -240,7 +240,7 @@ dedup <- do.call(rbind, lapply(dup_samp, function(marker) {
   rev_table$ALT <- temp
   ##combine corrected row with majority ref rows
   mark_table <- rbind(mark_table[mark_table$REF == ref,], rev_table)
-  concensus <- data.frame(c(mark_table[1, 1:9], apply(mark_table[10:ncol(mark_table)], 2, get_consensus_call)))
+  concensus <- data.frame(c(mark_table[1, 1:9], apply(mark_table[10:(ncol(mark_table)-1)], 2, get_consensus_call), mark_table[ncol(mark_table)]))
   return(concensus)
 }))
 
@@ -248,8 +248,86 @@ m3_new <- rbind(m3_orig, dedup) %>% arrange(X.CHROM, POS) %>% rename(CHROM = X.C
 
 
 ##read in VCF
-m1_header <- readLines(paste0("data/raw_vcf/", geno_list[1]), n =100)
+m1_header <- readLines(paste0("data/raw_vcf/",geno_list[1]), n =100)
 m1_header <- m1_header[1:(grep("#CHROM", m1_header)-1)]
 m3_body_header <- paste0("#", paste(colnames(m3_new), collapse="\t"))
 vcf_output <- c(m1_header, m3_body_header, m3_new)
-writeLines(vcf_output, "${sample}_dedup.vcf")
+writeLines(vcf_output, "test.vcf")
+
+
+
+
+
+# samples <- rbind(samples, data.frame(V1 = c("UX1999-20", "UX2031-30")))
+
+
+
+##import samples
+# samples <- read.delim("outputs/reseq_samples.txt", header=F)[[1]]
+samples <- read.delim("data/SunRILs_keyfile_merged.csv")
+
+##cleaning samples
+remove_tags <- c("NOPLANT", "NOTISSUE", "BLANK")
+samples <- samples[grep(paste(remove_tags, collapse="|"), samples$FullSampleName, invert=T),]
+
+clean_names <- function(column_names) { 
+  tags <- c("-SMTISSUE", "-NWG", "-A+", "-A-", "+")
+  cn <- sub("\\:.*", "", column_names)
+  cn <- gsub(paste0("\\b(", paste0(tags, collapse="|"), ")\\b"), "", cn)
+  cn <- gsub("UX1999-", "UX2031-99", cn)
+  return(cn)
+}
+
+samples$FullSampleName <- clean_names(samples$FullSampleName)
+
+write.table(samples, "data/SunRILs_keyfile_merged.tsv",quote=F, sep="\t", row.names=F )
+s2 <- filter(samples, FullSampleName == "HILLIARD")
+write.table(samples, "data/HILLIARD_keyfile.tsv",quote=F, sep="\t", row.names=F )
+
+
+
+
+
+
+
+
+
+
+
+get_consensus_call <- function(sample) {
+  sample <- sample[!is.na(sample)]
+  calls <- tstrsplit(grep("\\./\\.", sample, invert = TRUE, value = TRUE), ":")
+  if (length(calls) == 0) {return(sample[1])}
+  GT <- names(sort(table(calls[1]), decreasing=T))[1]
+  GT_pos <- grep(GT, calls[[1]])
+  AD <- names(sort(table(calls[[2]][GT_pos]), decreasing=T))[1]
+  DP <- max(as.numeric(calls[[3]][GT_pos]))
+  GQ <- max(as.numeric(calls[[4]][GT_pos]))
+  PL <- names(sort(table(calls[[5]][GT_pos]), decreasing=T))[1]
+  return(paste(GT, AD, DP, GQ, PL, sep=":"))
+}
+
+##get duplicated samples
+print("deduplicating samples")
+dup_samp <- table(colnames(m4))
+dup_samp <- names(dup_samp[dup_samp>1])
+dup_samp <- "UX2010.76"
+for (ind in dup_samp) {
+  print(ind)
+  par <- as.matrix(select.inds(geno, id == ind))
+  cs <- as.data.frame(t((apply(par, 2, consensus_info))))
+  cs1 <- ifelse(cs$count > nrow(par)/2, cs$most_common, NA)
+  if (exists("dedup")) { 
+    cs2 <- data.frame(t(cs1))
+    row.names(cs2) <- ind; colnames(cs2) <- colnames(par)
+    dedup <- rbind(dedup, cs2)
+  } else {
+    names(cs1) <- row.names(cs)
+    dedup <- data.frame(t(cs1))
+    row.names(dedup) <- ind
+  }
+}
+
+m4 <- m3[1:15, 1:15]
+colnames(m4[10:14]) <- "UX2010.76"
+

@@ -409,21 +409,21 @@ for (fam in pedigree$Cross_ID) {
   }
   lm <- lm %>% mutate(chrom = sapply(strsplit(chrom, "\\."), "[", 1))
   ##enforce cM/pos order
-  lm_mono <- lm 
-  diff <- 1
-  while (diff > 0) {
-    r1 <- nrow(lm_mono)
-    lm_mono <- lm_mono %>%
-      arrange(chrom, cM) %>%
-      group_by(chrom) %>%
-      mutate(diffp = c(NA, diff(pos)),
-             diffc = c(NA, diff(cM))) %>%
-      filter(is.na(diffp) | is.na(diffc) | diffp > 0 | diffc > 0) %>%
-      select(-c(diffp, diffc)) %>%
-      ungroup()
-    diff <- r1-nrow(lm_mono)
-    print(glue("{r1}, {diff}"))
-  }
+  lm_mono <- lm
+  # diff <- 1
+  # while (diff > 0) {
+  #   r1 <- nrow(lm_mono)
+  #   lm_mono <- lm_mono %>%
+  #     arrange(chrom, cM) %>%
+  #     group_by(chrom) %>%
+  #     mutate(diffp = c(NA, diff(pos)),
+  #            diffc = c(NA, diff(cM))) %>%
+  #     filter(is.na(diffp) | is.na(diffc) | diffp > 0 | diffc > 0) %>%
+  #     select(-c(diffp, diffc)) %>%
+  #     ungroup()
+  #   diff <- r1-nrow(lm_mono)
+  #   print(glue("{r1}, {diff}"))
+  # }
   write.table(lm_mono, glue("linkage_map/monotonic/{fam}_GBS_monotonic.map"), quote=F, sep="\t", row.names=F, col.names=F)
 }
 
@@ -446,6 +446,8 @@ for (chr in chroms) {
 monotonic_consensus <- select(monotonic_consensus, c(chrom, cM, pos))
 write.table(monotonic_consensus, "linkage_map/monotonic/consensus_GBS_monotonic.map", quote=F, sep="\t", row.names=F, col.names=F)
 
+
+##add missing chromosomes, filter for out of order markers
 for (fam in pedigree$Cross_ID) {
   map <- read.table(glue("linkage_map/monotonic/{fam}_GBS_monotonic.map"), header=F, col.names= c("chrom", "marker", "cM", "pos"))
   for (chr in chroms) {
@@ -456,6 +458,27 @@ for (fam in pedigree$Cross_ID) {
       map <- rbind(map, add)
     }
   }
-  write.table(map, glue("linkage_map/monotonic/{fam}_GBS_monotonic.map"), quote=F, sep="\t", row.names=F, col.names=F)
   
+  lm_mono <- map 
+  diff <- 1
+  while (diff > 0) {
+    r1 <- nrow(lm_mono)
+    lm_mono <- lm_mono %>%
+      arrange(chrom, cM) %>%
+      group_by(chrom) %>%
+      mutate(diffp = c(NA, diff(pos)),
+             diffc = c(NA, diff(cM))) %>%
+      filter(is.na(diffp) | is.na(diffc) | (diffp > 0 & diffc > 0)) %>%
+      select(-c(diffp, diffc)) %>%
+      ungroup()
+    diff <- r1-nrow(lm_mono)
+    print(glue("{r1}, {diff}"))
+  }
+  map <- lm_mono
+  
+  map <- map %>% mutate(pos = round(pos, 0)) %>%
+    mutate(marker=glue("S{chrom}_{pos}"))
+  
+  
+  write.table(map, glue("linkage_map/monotonic/{fam}_GBS_monotonic.map"), quote=F, sep="\t", row.names=F, col.names=F)
 }
