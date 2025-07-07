@@ -18,19 +18,43 @@ pedigree <- read.csv("data/cross_info.csv", header=F, col.names = c("Cross_ID", 
 chrom_lengths <- read.delim("data/chromosome_lengths.tsv")
 
 chrom_lengths_split <-  read.delim("data/chrom_lengths_split.txt")
-# 
-##standardize input if necessary
-# for (fam in pedigree$Cross_ID) {
-#   print(fam)
-#   out_file <- glue("linkage_map/maps/{fam}_linkage_map")
-#   lines <- readLines(glue("{out_file}.csv"))
-#   genodata <- lines[4:length(lines)]
-#   genodata <- gsub("AA", "A", genodata)
-#   genodata <- gsub("BB", "B", genodata)
-#   writeLines(c(lines[1:3], genodata), con = glue("{out_file}_conv.csv"))
-#   print(length(lines))
-#   print(length(genodata)+3)
-# }
+
+
+
+###note, UX2023 doesn't seem to have an alt parent (AGS2000)
+#standardize input if necessary
+for (fam in pedigree$Cross_ID[13:15]) {
+  print(fam)
+  out_file <- glue("linkage_map/maps/{fam}_linkage_map")
+  lines <- readLines(glue("{out_file}.csv"))
+  genodata <- lines[4:length(lines)]
+  genodata <- gsub("AA", "A", genodata)
+  genodata <- gsub("BB", "B", genodata)
+  ##make NAM founder parent always "A"
+  geno_table <- read.csv(textConnection(genodata), header=F, stringsAsFactors = F)
+  gt2 <- geno_table[1:6]
+  parent_priority <- c("HILLIARD", "GA06493-13LE6", "NC08-23383")
+  parent_present <- parent_priority[parent_priority %in% geno_table$V1][1]
+  switched <- mapply(
+    function(col_data, parent_allele) {
+      if (parent_allele == "B") chartr("AB", "BA", col_data) else col_data
+    },
+    geno_table[, 7:ncol(geno_table)],
+    as.character(geno_table[geno_table$V1 == parent_present, 7:ncol(geno_table), drop = FALSE])
+  )
+  ##save output
+  genodata <- apply(cbind(gt2, switched), 1, paste, collapse = ",")
+  
+  writeLines(c(lines[1:3], genodata), con = glue("{out_file}_conv.csv"))
+  print(length(lines))
+  print(length(genodata)+3)
+  ##remove monomorphic markers
+  gt <- read.delim(glue("{out_file}_conv.csv"), sep=",")
+  mt <- gt[grep("UX", gt$genotype, invert=T),]
+  mt <- mt[!is.na(mt$index),]
+  mt2 <- gt[,!(mt[1,] == mt[2,] & mt[1,] != "-")]
+  write.table(mt2, file = glue("{out_file}_conv.csv"), quote = F, row.names = F, col.names = T, sep=",", na="")
+}
 
 for (fam in pedigree$Cross_ID) {
   print(fam)
@@ -40,10 +64,11 @@ for (fam in pedigree$Cross_ID) {
   SunCross <- convert2cross2(cross)
   ##calculate QTL probabilities using geno prob
   pr <- calc_genoprob(SunCross, map = SunCross$gmap, cores=4)
-  bonf_threshold <- -log10((0.1 / totmar(cross)))
+  # bonf_threshold <- -log10((0.1 / totmar(cross)))
   ##calculate a kinship matrix of relationship among individuals
   ##Perform genome scan using Haley-Knott regression
   for (trait in colnames(SunCross$pheno)[-1]) {
+    sig_threshold <- summary(scan1perm(pr, SunCross$pheno[, trait], n_perm=1000, cores=0), alpha=c(0.1))
     out <- scan1(pr, SunCross$pheno[, trait])
     pks <- find_peaks(out, SunCross$gmap, peakdrop=0.5, expand2markers=T, drop=0.5, threshold = 1.5)
     print(nrow(pks))
@@ -54,7 +79,7 @@ for (fam in pedigree$Cross_ID) {
       }
       pks$Pos <- Pos
       pks$cross <- fam; pks$trait <- trait
-      if (exists('peaks')) {peaks <- rbind(peaks, pks)} else {peaks <- pks}
+      if (exists('peak_df')) {peak_df <- rbind(peak_df, pks)} else {peak_df <- pks}
       for (chr in unique(pks$chr)) {
         effects <- data.frame(scan1coef(pr[,chr], SunCross$pheno[, trait] ))
         effects$Pos <- row.names(effects)
@@ -78,12 +103,12 @@ for (fam in pedigree$Cross_ID) {
         bg='transparent')
     par(mar=c(4,4,6,1))
     plot(out, SunCross$gmap, lodcolumn = 'pheno1', main=paste0("CIM of ", fam), bg='transparent')
-    abline(h=bonf_threshold, col='#CC0000')
+    abline(h=sig_threshold, col='#CC0000')
     dev.off()
   }
 }
-peaks <- merge(peaks, peak_effects, by=c('Pos', 'cross', 'trait'))
-write.table(peaks, file="outputs/qtl2_cim.tsv", quote=F, sep="\t", row.names=F)
+peak_df <- merge(peak_df, peak_effects, by=c('Pos', 'cross', 'trait'))
+write.table(peak_df, file="outputs/qtl2_cim.tsv", quote=F, sep="\t", row.names=F)
 # peak_effects_subset <- peak_effects[paste0(peak_effects$Pos, peak_effects$cross, peak_effects$trait) %in% paste0(peaks$Pos, peaks$cross, peaks$trait),]
 # write.table(peak_effects, file="outputs/qtl2_cim_peak_effects.tsv", quote=F, sep="\t", row.names=F)
 
@@ -306,22 +331,22 @@ peak_summary1 <- merge(peak_summary, pedigree, by='Cross_ID') %>%
   mutate(cross_label = paste(Parent_2, "-", Parent_1))
          # peak_label = paste0(chromosome, ":", peak_start, "-", peak_end)) 
 
-##convert to NAM founder allele coding
+#convert to NAM founder allele coding
 peak_summary1 <- peak_summary1 %>%
   rename("NC08-23383" = NC08,
-         "GA06493-13LE6" = GA13LE6) %>% 
+         "GA06493-13LE6" = GA13LE6) %>%
   rowwise() %>%
   mutate(
     genotype_val = get(Parent_2),
     missing_geno = ifelse(is.na(genotype_val), 1, 0),
-    AA = if (!is.na(genotype_val) && genotype_val == 2) -1 * AA else AA,
-    BB = if (!is.na(genotype_val) && genotype_val == 2) -1 * BB else BB
+    # AA = if (!is.na(genotype_val) && genotype_val == 2) -1 * AA else AA,
+    # BB = if (!is.na(genotype_val) && genotype_val == 2) -1 * BB else BB
   ) %>%
   ungroup() %>%
   select(-genotype_val)
 
 peak_summary2 <- filter(peak_summary, Cross_ID == 'GWAS') %>%
-  mutate(cross_label = ' GWAS')
+  mutate(cross_label = 'GWAS')
 peak_summary <- merge(peak_summary2, peak_summary1, 
                       by=intersect(names(peak_summary2), names(peak_summary1)), all=T) %>%
   mutate(chromosome = factor(chromosome, levels = cls$Arm))
@@ -329,8 +354,8 @@ peak_summary <- merge(peak_summary2, peak_summary1,
 
 
 ##cleaning up missing values manually
-peak_summary[peak_summary$chromosome == '7AL' & peak_summary$Cross_ID == "UX1992", c("AA", "BB", "missing_geno")] <- 
-  c(peak_summary[peak_summary$chromosome == '7AL' & peak_summary$Cross_ID == "UX1992", c("AA", "BB")]*-1, 0)
+# peak_summary[peak_summary$chromosome == '7AL' & peak_summary$Cross_ID == "UX1992", c("AA", "BB", "missing_geno")] <- 
+#   c(peak_summary[peak_summary$chromosome == '7AL' & peak_summary$Cross_ID == "UX1992", c("AA", "BB")]*-1, 0)
 
 
 # ggplot(peak_summary, aes(x=chromosome, y=cross_label, fill=AA)) +
@@ -359,6 +384,11 @@ peak_summary[peak_summary$chromosome == '7AL' & peak_summary$Cross_ID == "UX1992
 #   theme(axis.text.x = element_text(angle = 60, hjust = 1),
 #         axis.text.y = element_text(hjust = 0))
 
+
+parentage_order <- pedigree[order(pedigree$Parent_2, decreasing=T),] %>% 
+  mutate(cross_label = paste(Parent_2, Parent_1, sep=" - ")) %>%
+  select(cross_label) %>% as.vector
+peak_summary <- mutate(peak_summary, cross_label = factor(cross_label, levels = c( "GWAS", parentage_order[[1]])))
 
 ggplot(peak_summary, aes(x = chromosome, y = cross_label, fill = AA)) +
   geom_point(aes(fill = AA, size = LOD), shape = 22, colour = 'gray90') +
@@ -443,7 +473,9 @@ for (chr in chroms) {
   path$chrom <- chr
   monotonic_consensus <- rbind(monotonic_consensus, path)
 }
-monotonic_consensus <- select(monotonic_consensus, c(chrom, cM, pos))
+monotonic_consensus <- mutate(monotonic_consensus, pos = round(pos,0)) %>%
+  mutate(marker = glue("{chrom}_{pos}")) %>%
+  select(chrom, marker, cM, pos)
 write.table(monotonic_consensus, "linkage_map/monotonic/consensus_GBS_monotonic.map", quote=F, sep="\t", row.names=F, col.names=F)
 
 
@@ -452,9 +484,7 @@ for (fam in pedigree$Cross_ID) {
   map <- read.table(glue("linkage_map/monotonic/{fam}_GBS_monotonic.map"), header=F, col.names= c("chrom", "marker", "cM", "pos"))
   for (chr in chroms) {
     if (!(chr %in% map$V1)) {
-      add <- monotonic_consensus[monotonic_consensus$chrom == chr,] %>%
-        mutate(marker = glue("S{chrom}_{pos}")) %>%
-        select(chrom, marker, cM, pos)
+      add <- monotonic_consensus[monotonic_consensus$chrom == chr,]
       map <- rbind(map, add)
     }
   }

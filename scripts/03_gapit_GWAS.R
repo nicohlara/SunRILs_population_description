@@ -15,7 +15,9 @@ blues <- read.delim("data/blues.csv", sep=",") %>%
   select(-c(Cross_ID)) %>%
   data.frame()
 
-genotype <- read.vcf("data/SunRILs_prod_filt_imp.vcf.gz", convert.chr=F)
+# genotype <- read.vcf("data/SunRILs_prod_filt_imp.vcf.gz", convert.chr=F)
+genotype <- read.bed.matrix("data/SunRILs_imp_filtmerge")
+
 ##Mapping vector for renaming chromosomes
 mapping <- c("1A", "1B", "1D", "2A", "2B", "2D", "3A", "3B", "3D",
              "4A", "4B", "4D", "5A", "5B", "5D", "6A", "6B", "6D",

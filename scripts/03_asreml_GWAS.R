@@ -12,12 +12,13 @@ setwd(here())
 blues <- read.delim("data/blues.csv", sep=",") %>%
   mutate(Cross_ID = as.factor(Cross_ID)) %>%
   rename(Genotype = Entry)
-genotype <- read.vcf("data/SunRILs_prod_filt_imp.vcf.gz", convert.chr=F)
+# genotype <- read.vcf("data/processed_vcf/SunRILs_imp.vcf.gz", convert.chr=F)
+genotype <- read.bed.matrix("data/SunRILs_imp_filtmerge")
 
-##take smallest biparental and get proportion of whole pop
-##then multiply by reasonable MAF for F4 genotyped individuals
-table(blues$Cross_ID)
-MAF_threshold <- (110/sum(table(blues$Cross_ID)))*0.5
+# ##take smallest biparental and get proportion of whole pop
+# ##then multiply by reasonable MAF for F4 genotyped individuals
+# table(blues$Cross_ID)
+# MAF_threshold <- (110/sum(table(blues$Cross_ID)))*0.5
 
 ##filter genotype by entries in blues file
 # genotype <- select.inds(genotype, id %in% blues$Entry) 
@@ -46,8 +47,8 @@ for (trait in colnames(blues)[-c(1:2)]) {
                        indiv = 'Genotype',
                        geno.data = as.matrix(genotype),
                        resp = trait,
-                       map.data = geno.map,
-                       maf=MAF_threshold)
+                       map.data = geno.map)#,
+                       # maf=MAF_threshold)
   
   gwas <- gwas.asreml(pheno.data = gwas_obj$pheno.data,
                       resp = trait,
@@ -57,7 +58,7 @@ for (trait in colnames(blues)[-c(1:2)]) {
                       map.data = gwas_obj$map.data, 
                       bonferroni = F,
                       pvalue.thr=bonf_threshold)
-  
+  manhattan.plot(gwas$gwas.all)
   gtable <- gwas$gwas.sel
   gtable$trait <- trait
   if (exists("GWAS_table")) {GWAS_table <- rbind(GWAS_table, gtable)} else {GWAS_table <- gtable}
