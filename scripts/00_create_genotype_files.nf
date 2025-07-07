@@ -6,25 +6,21 @@ params.population_table = "${params.basedir}/data/cross_info.csv"
 params.output_dir = "${params.basedir}/data/processed_vcf"
 
 // discovery and production parameters
-params.fastq_dir  = "/90daydata/guedira_seq_map/nico/fastq"
-params.work_dir     = "/90daydata/guedira_seq_map/nico/SunRILs_population_calling"
-params.study   = "SunRILs"
-params.keyfile      = "${params.basedir}/data/HILLIARD_keyfile.csv"
+params.fastq_dir = "/90daydata/guedira_seq_map/nico/fastq/"
+params.work_dir = "/90daydata/guedira_seq_map/nico/SunRILs_population_calling"
+params.study = "SunRILs"
+params.keyfile = "${params.basedir}/data/HILLIARD_keyfile.tsv"
 //params.keyfile      = "${params.basedir}/data/SunRILs_keyfile_merged.csv"
-params.ref     = "/90daydata/guedira_seq_map/RefCS_2.1/iwgsc_refseqv2.1_assembly.fa"
-params.enzymes      = "PstI-MspI"
-params.taglength    = "85"
-params.ram          = "300g"
-params.ncores       = "40"
-params.tassel_run   = " /90daydata/guedira_seq_map/nico/UX1992_reseq_calling/HPC-GBS-Pipeline/tassel-5-standalone/run_pipeline.pl"
+params.ref = "/90daydata/guedira_seq_map/RefCS_2.1/iwgsc_refseqv2.1_assembly.fa"
+params.enzymes = "PstI-MspI"
+params.taglength = "85"
+params.minq = "0"
+params.ram = "300g"
+params.ncores = "40"
+params.tassel_run = "/90daydata/guedira_seq_map/nico/UX1992_reseq_calling/HPC-GBS-Pipeline/tassel-5-standalone/run_pipeline.pl"
 params.tassel_pipeline = "${params.basedir}/scripts/external_dependencies/tassel_disc_plus_prod_bwa.sh"
 
 //params.vcf_files = "${params.basedir}/data/raw_vcf"
-
-// Input: fastq directory
-Channel.fromPath("${params.work_dir}/fastq/*.{fq,fastq,fastq.gz,fq.gz}").ifEmpty { error "No FASTQ files found" }.set { fastq_files }
-
-
 
 // bcftools filtering parameters
 params.depth = '3'
@@ -44,7 +40,7 @@ params.monotonic = "${params.basedir}/linkage_map/monotonic"
 workflow {
     new File(params.output_dir).mkdirs()
 
-    // Load input VCFs
+    // Load input fastq
     Channel.fromPath("${params.fastq_dir}")
         .set { fastq_dir }
 
@@ -53,7 +49,8 @@ workflow {
         .set { pop_table_ch }
 
     // Step 1: discovery and production
-	raw_vcf = tassel_discovery_and_production(fastq_dir)
+    raw_vcf = tassel_discovery_and_production(fastq_dir)
+	| fix_tassel_vcf
 
     // Step 2: Combine filtered VCF with the population table
     vcf_with_pop_table = raw_vcf.combine(pop_table_ch)
@@ -94,40 +91,38 @@ process tassel_discovery_and_production {
     """
     mkdir -p tassel_tmp && cd tassel_tmp
 
-    # Absolute paths
-    keyfile=\$(realpath ${params.keyfile})
-    fastq=\$(realpath ../${fastq_dir})
-    ref=\$(realpath ${params.ref})
-
-    # Ensure slash
-    [[ \${fastq: -1} != "/" ]] && fastq="\${fastq}/"
-
     # Discovery
-    \${params.tassel_run} -Xms25g -Xmx${params.ram} -fork1 \
-        -GBSSeqToTagDBPlugin -e ${params.enzymes} -i \${fastq} \
-        -db ${params.study}.db -k \${keyfile} -kmerLength ${params.taglength} \
-        -mnQS ${params.minq} -c 5 -mxKmerNum 50000000 -deleteOldData true \
-        -endPlugin -runfork1
+    ${params.tassel_run} -Xms25g -Xmx100g -fork1 -GBSSeqToTagDBPlugin \
+	-e ${params.enzymes} \
+	-i ${params.fastq_dir} \
+	-db ${params.study}.db \
+	-k ${params.keyfile} \
+	-kmerLength ${params.taglength} \
+	-mnQS ${params.minq} \
+	-c 5 \
+	-mxKmerNum 50000000 \
+	-deleteOldData true \
+	-endPlugin -runfork1
 
-    \${params.tassel_run} -Xms25g -Xmx${params.ram} -fork1 \
+    ${params.tassel_run} -Xms25g -Xmx${params.ram} -fork1 \
         -TagExportToFastqPlugin -db ${params.study}.db \
         -o ${params.study}_MasterGBStags.fa.gz -endPlugin -runfork1
 
-    bwa mem -t ${task.cpus} \${ref} ${params.study}_MasterGBStags.fa.gz > ${params.study}.sam
+    bwa mem -t ${task.cpus} ${params.ref} ${params.study}_MasterGBStags.fa.gz > ${params.study}.sam
 
-    \${params.tassel_run} -Xms25g -Xmx${params.ram} -fork1 \
+    ${params.tassel_run} -Xms25g -Xmx${params.ram} -fork1 \
         -SAMToGBSdbPlugin -i ${params.study}.sam -db ${params.study}.db \
         -aLen 0 -aProp 0.0 -endPlugin -runfork1
 
     # Discovery SNP calling
     DISC_ARGS="-fork1 -DiscoverySNPCallerPluginV2 -db ${params.study}.db -mnMAF 0.01 -mnLCov 0.1 -deleteOldData true"
 
-    \${params.tassel_run} -Xms25g -Xmx${params.ram} \$DISC_ARGS -endPlugin -runfork1
+    ${params.tassel_run} -Xms25g -Xmx${params.ram} \$DISC_ARGS -endPlugin -runfork1
 
     # Production SNP calling
-    \${params.tassel_run} -Xms25g -Xmx${params.ram} -fork1 \
+    ${params.tassel_run} -Xms25g -Xmx${params.ram} -fork1 \
         -ProductionSNPCallerPluginV2 -db ${params.study}.db -e ${params.enzymes} \
-        -i \${fastq} -k \${keyfile} -kmerLength ${params.taglength} \
+        -i ${params.fastq_dir} -k ${params.keyfile} -kmerLength ${params.taglength} \
         -o ${params.study}_production.vcf -endPlugin -runfork1
 
     # Compress and index
@@ -135,6 +130,47 @@ process tassel_discovery_and_production {
     bcftools index -f ${params.study}_production.vcf.gz
 
     mv ${params.study}_production.vcf.gz ../
+    """
+}
+
+process fix_tassel_vcf {
+    input:
+    path vcf
+
+    output:
+    path "${params.study}_raw.vcf.gz"
+
+    script:
+    """
+    echo ${vcf}
+    #grep "^##" ${vcf} > header.vcf
+    gunzip -c ${vcf} | grep "^##" >header.vcf
+
+    ## If the reference fasta included "chr" before chromosome names, these are
+    ## removed by Tassel, so also need to be stripped out of the contig lines 
+    ## in the header for bcftools to work
+    sed -i 's/ID=chr/ID=/' header.vcf
+
+    ## Tassel also capitalizes all characters in chrom names. In the case of wheat
+    ## if the unaligned contigs are given chromosome designator "Un", this must
+    ## be capitalized
+    sed -i 's/ID=Un/ID=UN/' header.vcf
+
+    ## AD and PL FORMAT fields defined incorrectly
+    ## Also, TASSEL's description for the PL field contains equal signs and commas, which causes problems with VCFTools
+    sed -i 's/AD,Number=./AD,Number=R/g' header.vcf
+    sed -i 's/PL,Number=./PL,Number=G/g' header.vcf
+    sed -i 's/Description="Normalized, Phred-scaled likelihoods for AA,AB,BB genotypes where A=ref and B=alt; not applicable if site is not biallelic"/Description="Normalized Phred-scaled likelihoods for genotypes as defined in the VCF specification"/g' header.vcf
+
+    ## AF and NS INFO fields do not appear to actually be present in file - delete
+    grep -E -v "AF,Number=|NS,Number=" header.vcf > temp.vcf
+    mv temp.vcf header.vcf
+
+    ## The "QualityScore" INFO field is not defined in header - add
+    echo "##INFO=<ID=QualityScore,Number=1,Type=Float,Description=\"Quality Score\">" >> header.vcf
+
+    gunzip -c ${vcf} | grep -v "^##" >> header.vcf
+    bgzip header.vcf -o ${params.study}_raw.vcf.gz
     """
 }
 
@@ -150,6 +186,9 @@ process split_by_subpop {
     script:
     sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
     """
+    # Index vcf
+    bcftools index ${vcf}
+
     # Extract sample names from the VCF file header
     bcftools query -l ${vcf} > all_samples.txt
     grep '^UX[0-9]\\{4\\}-' all_samples.txt | sed 's/-.*//' | sort -u > cross_ids_present.txt
