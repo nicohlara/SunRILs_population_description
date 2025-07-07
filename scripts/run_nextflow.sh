@@ -17,4 +17,5 @@ cd /project/guedira_seq_map/nico/SunRILs_population_description
 
 export _JAVA_OPTIONS="-Xmx350G"
 
-nextflow scripts/00_vcf_preprocess_combine.nf -resume
+#nextflow scripts/00_vcf_preprocess_combine.nf -resume
+nextflow run scripts/00_create_genotype_files.nf -resume
