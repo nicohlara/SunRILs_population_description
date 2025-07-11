@@ -328,7 +328,7 @@ peak_summary <- as.data.table(pks1)[, {
 }, by = .(trait, chromosome, Cross_ID)]
 
 peak_summary1 <- merge(peak_summary, pedigree, by='Cross_ID') %>%
-  mutate(cross_label = paste(Parent_2, "-", Parent_1))
+  mutate(cross_label = paste(Cross_ID, Parent_2, Parent_1, sep=" - "))
          # peak_label = paste0(chromosome, ":", peak_start, "-", peak_end)) 
 
 #convert to NAM founder allele coding
@@ -385,10 +385,10 @@ peak_summary <- merge(peak_summary2, peak_summary1,
 #         axis.text.y = element_text(hjust = 0))
 
 
-parentage_order <- pedigree[order(pedigree$Parent_2, decreasing=T),] %>% 
-  mutate(cross_label = paste(Parent_2, Parent_1, sep=" - ")) %>%
+parentage_order <- pedigree[order(pedigree$Parent_2, decreasing=F),] %>% 
+  mutate(cross_label = paste(Cross_ID,Parent_2, Parent_1, sep=" - ")) %>%
   select(cross_label) %>% as.vector
-peak_summary <- mutate(peak_summary, cross_label = factor(cross_label, levels = c( "GWAS", parentage_order[[1]])))
+peak_summary <- mutate(peak_summary, cross_label = factor(cross_label, levels = c( "GWAS", rev(parentage_order[[1]]))))
 
 ggplot(peak_summary, aes(x = chromosome, y = cross_label, fill = AA)) +
   geom_point(aes(fill = AA, size = LOD), shape = 22, colour = 'gray90') +

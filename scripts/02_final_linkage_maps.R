@@ -21,9 +21,12 @@ blues <- read.delim("data/blues.csv", sep=",") %>%
   rename(genotype = Entry) %>%
   select(-Cross_ID)
 
-for (fam in pedigree$Cross_ID) {
+redone_fams <- c("UX1992")
+# for (fam in pedigree$Cross_ID) { ##original
+for (fam in redone_fams) {
   print(fam)
-  vcf <- read.vcf(glue("linkage_map/biparental_vcf/{fam}_subset.vcf.gz"), convert.chr =FALSE)
+  # vcf <- read.vcf(glue("linkage_map/biparental_vcf/{fam}_subset.vcf.gz"), convert.chr =FALSE)
+  vcf <- read.vcf(glue("data/processed_vcf/SunRILs_raw_{fam}_subset_filt.vcf.gz"), convert.chr = F)
   if (fam == "UX2031") {
     vcf@ped$id <- gsub("UX2031-99-", "UX2031-99", unique(vcf@ped$id))
   }
@@ -37,10 +40,16 @@ filter <- data.frame(popmiss = c(30, 30, 22.5, 27.5, 20, 25, 30, 25, 25, 27.5, 2
                      markmiss = c(0.5, .5, .65, .6, .55, .65, .4, .5, .55, .8, .75, .7, .7, .75, .7))
 rownames(filter) <- pedigree$Cross_ID
 
+redo_filter <- data.frame(popmiss = c(35),
+                          markmiss= c(.75))
+rownames(redo_filter) <- redone_fams
 ##filter down the markers
-for (fam in pedigree$Cross_ID) {
-  pop_missing <- filter[fam, 'popmiss']*1000
-  miss_threshold <- filter[fam, 'markmiss']
+# for (fam in pedigree$Cross_ID) {
+for (fam in redone_fams) {
+  # pop_missing <- filter[fam, 'popmiss']*1000
+  # miss_threshold <- filter[fam, 'markmiss']
+  pop_missing <- redo_filter[fam, 'popmiss']*1000
+  miss_threshold <- redo_filter[fam, 'markmiss']
   SunCross<- read.cross(format="csv",file=glue("linkage_map/cross_objects/{fam}_rqtl.csv"),
                         estimate.map=FALSE, na.strings=c("-","NA"),
                         genotypes=c("A","H","B"), crosstype="riself")
@@ -70,7 +79,8 @@ for (fam in pedigree$Cross_ID) {
 stats <- list()
 
 ##make maps
-for (fam in pedigree$Cross_ID[-c(1:7)]) {
+# for (fam in pedigree$Cross_ID[-c(1:7)]) {
+for (fam in redone_fams) {
   print(fam)
   SunCross<- read.cross(format="csv",file="linkage_map/SunRILs_filtered.csv",
                         estimate.map=FALSE, na.strings=c("-","NA"),
