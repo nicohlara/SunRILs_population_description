@@ -24,6 +24,8 @@ params.tassel_pipeline = "${params.basedir}/scripts/external_dependencies/tassel
 // bcftools filtering parameters
 params.depth = '3'
 params.quality = '20'
+params.baseline_MAF = '0.002'
+params.baseline_missing = '0.4'
 params.MAF = '0.05'
 params.missing = '0.4'
 
@@ -51,8 +53,9 @@ workflow {
     raw_vcf = tassel_discovery_and_production(fastq_dir)
 	| fix_tassel_vcf
 
-    // Step 2: Combine filtered VCF with the population table
-    vcf_with_pop_table = raw_vcf.combine(pop_table_ch)
+    // Step 2: Filter vcf and combine filtered VCF with the population table
+	filt_vcf = bcftools_fullfilter(raw_vcf)
+    vcf_with_pop_table = filt_vcf.combine(pop_table_ch)
 
     // Step 3: Split filtered VCFs by subpopulations
     subpop_vcfs = split_by_subpop(vcf_with_pop_table)
@@ -173,6 +176,33 @@ process fix_tassel_vcf {
     """
 }
 
+process bcftools_fullfilter {
+    publishDir "${params.output_dir}", mode: 'copy'
+
+    input:
+    path vcf
+
+    output:
+    path "${sample}_filt.vcf.gz"
+	
+    script:
+    sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
+    """
+    bcftools view -i 'FORMAT/DP > ${params.depth} && 'FORMAT/GQ' >= ${params.quality} && MAF > ${params.baseline_MAF} && F_MISSING < ${params.baseline_missing}' ${vcf} -Oz -o DP_MAF_MISS_filter.vcf.gz
+    bcftools view -m2 -M2 -v snps DP_MAF_MISS_filter.vcf.gz -Oz -o biallelic.vcf.gz
+    bcftools index -c biallelic.vcf.gz
+    bcftools view -t "^UNKNOWN" biallelic.vcf.gz -Oz -o "${sample}_filt.vcf.gz"
+    
+    ##create table of marker numbers
+    echo -e "VCF File\tTotal Markers" > filtering_marker_table.txt
+    for vcf in *.vcf.gz; do
+        total_markers=\$(bcftools stats "\$vcf" | grep "^SN" | grep "number of records" | awk '{print \$6}')
+        vcf_basename=\$(basename "\$vcf")
+        echo -e "\${vcf_basename}\t\${total_markers}" >> filtering_marker_table.txt
+    done
+    """
+}
+
 process split_by_subpop {
     errorStrategy 'ignore'
 
@@ -225,18 +255,7 @@ process bcftools_filter {
     script:
     sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
     """
-    bcftools view -i 'FORMAT/DP > ${params.depth} && 'FORMAT/GQ' >= ${params.quality} && MAF > ${params.MAF} && F_MISSING < ${params.missing}' ${vcf} -Oz -o DP_MAF_MISS_filter.vcf.gz
-    bcftools view -m2 -M2 -v snps DP_MAF_MISS_filter.vcf.gz -Oz -o biallelic.vcf.gz
-    bcftools index -c biallelic.vcf.gz
-    bcftools view -t "^UNKNOWN" biallelic.vcf.gz -Oz -o "${sample}_filt.vcf.gz"
-    
-    ##create table of marker numbers
-    echo -e "VCF File\tTotal Markers" > filtering_marker_table.txt
-    for vcf in *.vcf.gz; do
-        total_markers=\$(bcftools stats "\$vcf" | grep "^SN" | grep "number of records" | awk '{print \$6}')
-        vcf_basename=\$(basename "\$vcf")
-        echo -e "\${vcf_basename}\t\${total_markers}" >> filtering_marker_table.txt
-    done
+    bcftools view -i 'MAF > ${params.MAF} && F_MISSING < ${params.missing}' ${vcf} -Oz -o "${sample}_filt.vcf.gz"
     """
 }
 
