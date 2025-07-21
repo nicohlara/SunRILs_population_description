@@ -28,6 +28,7 @@ params.baseline_MAF = '0.002'
 params.baseline_missing = '0.4'
 params.MAF = '0.05'
 params.missing = '0.4'
+params.consensus_overlap = '0.5'
 
 // individual filtering parameters
 //params.hz = '0.2'
@@ -54,7 +55,7 @@ workflow {
 	| fix_tassel_vcf
 
     // Step 2: Filter vcf and combine filtered VCF with the population table
-	filt_vcf = bcftools_fullfilter(raw_vcf)
+    filt_vcf = bcftools_fullfilter(raw_vcf)
     vcf_with_pop_table = filt_vcf.combine(pop_table_ch)
 
     // Step 3: Split filtered VCFs by subpopulations
@@ -70,14 +71,38 @@ workflow {
         .map { cross_id, file -> tuple(cross_id, file) }
         .groupTuple()
 
-	// Step 5: filter and impute vcfs
-    grouped_subpop_vcfs
+    // Step 5: filter and impute vcfs
+    subpops = grouped_subpop_vcfs
         .map { cross_id, vcf ->
             println "Sending ${vcf} for imputation of ${cross_id}"
             tuple(cross_id, vcf)  // ensure tuple structure
         }
         | bcftools_filter
-		| beagle_impute
+	| beagle_impute
+
+    marker_files = subpops
+        | extract_markers
+
+    consensus_markers = marker_files
+        .collect()
+        | combine_markers
+
+    // Step 6: collect all imputed subpop vcfs, filter by consensus markers and impute
+    //imp_vcfs = consensus_markers
+    //    .combine(subpops)
+    //    .map { input ->
+    //        def (cm, cross_id, vcf) = input
+    //        tuple(cm, cross_id, vcf)
+    //    }
+    //    | filter_vcf_to_consensus
+     //   .collectFile(name: 'vcf_list.txt', storeDir: false)
+    vcf_files = subpops
+        .map { cross_id, vcf -> vcf }
+        .collect()
+        | merge_vcf
+    //    | generate_vcf_list  
+
+    //merge_vcf(vcf_files)
 }
 
 process tassel_discovery_and_production {
@@ -250,7 +275,7 @@ process bcftools_filter {
 
     output:
     //path "${sample}_filt.vcf.gz"
-	tuple val(cross_id), path("${sample}_filt.vcf.gz")
+    tuple val(cross_id), path("${sample}_filt.vcf.gz")
 	
     script:
     sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
@@ -268,14 +293,100 @@ process beagle_impute {
     tuple val(cross_id), path(vcf)
 
     output: 
-    path "${cross_id}_imp.vcf.gz"
+    tuple val(cross_id), path("${cross_id}_imp.vcf.gz")
 
     script:
     """
     beagle gt=${vcf} \
             out=${cross_id}_imp \
-            map=${params.monotonic}/${cross_id}_GBS_monotonic.map \
+    #        map=${params.monotonic}/${cross_id}_GBS_monotonic.map \
+            map=${params.monotonic}/consensus_GBS_monotonic.map \
             nthreads=40 \
             window=350
     """
 }
+
+process extract_markers {
+    input:
+    tuple val(cross_id), path(vcf)
+    
+    output:
+    path("${cross_id}_markers.txt")
+
+    script:
+    """
+    bcftools index ${vcf}
+    bcftools query -f '%ID\n' ${vcf} > "${cross_id}_markers.txt"
+    """
+}
+
+process combine_markers {
+    input:
+    path(marker_files)
+
+    output:
+    path "concensus_markers.txt"
+
+    script:
+    """
+    #!/usr/bin/env Rscript
+    id_files <- list.files(".", pattern="_markers.txt", full.names=TRUE)
+    id_lists <- lapply(id_files, function(file) read.delim(file, header=FALSE)[[1]])
+    id_counts <- table(unlist(id_lists))
+    id_majority <- names(id_counts[id_counts > length(id_lists) * ${params.consensus_overlap}])
+    write.table(id_majority, "concensus_markers.txt", sep="\\t", quote = F, row.names=F, col.names=F)
+    """
+}
+
+process filter_vcf_to_consensus {
+    input:
+    tuple path(consensus_markers), val(cross_id), path(vcf)
+
+    output:
+    path "${cross_id}_consensus.vcf.gz"
+
+    script:
+    """
+    bcftools view -i 'ID=@${consensus_markers}' -Oz -o "${cross_id}_consensus.vcf.gz" ${vcf}
+    bcftools index "${cross_id}_consensus.vcf.gz"
+    """
+}
+
+process generate_vcf_list {
+    input:
+    path(vcfs)
+
+    output:
+    path "vcf_list.txt"
+
+    script:
+    """
+    #!/usr/bin/env Rscript
+    vcf_files <- list.files(".", pattern="_imp.vcf.gz", full.names=TRUE)
+    writeLines(vcf_files, con="vcf_list.txt")
+    """
+}
+
+process merge_vcf {
+    publishDir "${params.output_dir}", mode: 'copy'
+
+    input:
+    //path 'vcf_list.txt'
+    path(vcfs)
+
+    output:
+    path "${params.study}_imp_filt.vcf.gz"
+
+    script:
+    """
+    ls ./*imp.vcf.gz > vcf_list.txt
+    cat vcf_list.txt
+    while read file; do
+        bcftools index -f "\${file}" 
+    done < vcf_list.txt
+
+    bcftools merge --file-list vcf_list.txt --force-samples -Oz -o SunRILs_imp.vcf.gz
+    beagle gt=SunRILs_imp.vcf.gz out=${params.study}_imp_filt map=${params.monotonic}/consensus_GBS_monotonic.map nthreads=40 window=350
+    """
+}
+
