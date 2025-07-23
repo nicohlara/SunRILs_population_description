@@ -10,7 +10,7 @@ setwd(here())
 
 pedigree <- read.csv("data/cross_info.csv")
 blues <- read.delim("data/blues.csv", sep=",") %>%
-  rename(genotype = Entry) %>%
+  dplyr::rename(genotype = Entry) %>%
   select(-Cross_ID)
 
 # cross_id <- 'UX1992'

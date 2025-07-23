@@ -23,7 +23,7 @@ chrom_lengths_split <-  read.delim("data/chrom_lengths_split.txt")
 
 ###note, UX2023 doesn't seem to have an alt parent (AGS2000)
 #standardize input if necessary
-for (fam in pedigree$Cross_ID[13:15]) {
+for (fam in pedigree$Cross_ID) {
   print(fam)
   out_file <- glue("linkage_map/maps/{fam}_linkage_map")
   lines <- readLines(glue("{out_file}.csv"))
@@ -97,7 +97,6 @@ for (fam in pedigree$Cross_ID) {
         
       }
     }
-    # png(filename=glue("{dir}/{fam}_{trait}_CIM.png"),   
     png(filename=glue("figures/CIM_plots/{fam}_{trait}_CIM.png"),
         width=750*3, height=300*3, res=72*3,
         bg='transparent')
@@ -112,7 +111,13 @@ write.table(peak_df, file="outputs/qtl2_cim.tsv", quote=F, sep="\t", row.names=F
 # peak_effects_subset <- peak_effects[paste0(peak_effects$Pos, peak_effects$cross, peak_effects$trait) %in% paste0(peaks$Pos, peaks$cross, peaks$trait),]
 # write.table(peak_effects, file="outputs/qtl2_cim_peak_effects.tsv", quote=F, sep="\t", row.names=F)
 
-
+# png(filename="figures/UX1995_1A_PM.png",
+#     width=750*3, height=300*3, res=72*3,
+#     bg='transparent')
+# par(mar=c(4,4,6,1))
+# plot(out, chr='1A', SunCross$gmap, lodcolumn = 'pheno1', main="CIM of PM for UX1995 chrom 1A")
+# abline(h=sig_threshold, col='#CC0000')
+# dev.off()
 
 
 ##create unified map of all linkage groups
@@ -256,7 +261,7 @@ plot(plot_frame$cM, plot_frame$pos, ylim=c(1, 1e9), cex=1, pch = 20, xlab="cM", 
 dev.off()
 
 
-## heatmap of marker effects
+## HEATMAP OF MARKER EFFECTS
 pks <- read.delim("outputs/qtl2_cim.tsv") %>%
   filter(trait == 'PM') %>%
   mutate(phys_pos = round(as.numeric(sapply(strsplit(Pos, "_"), "[", 2))/1e6, 1),
@@ -356,34 +361,6 @@ peak_summary <- merge(peak_summary2, peak_summary1,
 ##cleaning up missing values manually
 # peak_summary[peak_summary$chromosome == '7AL' & peak_summary$Cross_ID == "UX1992", c("AA", "BB", "missing_geno")] <- 
 #   c(peak_summary[peak_summary$chromosome == '7AL' & peak_summary$Cross_ID == "UX1992", c("AA", "BB")]*-1, 0)
-
-
-# ggplot(peak_summary, aes(x=chromosome, y=cross_label, fill=AA)) +
-# # ggplot(peak_summary, aes(x=peak_label, y=cross_label, fill=AA)) +
-#   geom_tile(color='white', linewidth=0.2) +
-#   scale_fill_gradient2(low = "blue", mid = "white", high = "red", 
-#                        midpoint = 0, na.value = "grey90", name = "AA Effect") +
-#   theme_minimal(base_size = 12) +
-#   labs(x = "Chromosome", y = "Cross") +
-#   theme(axis.text.x = element_text(angle = 45, hjust = 1),
-#         axis.text.y = element_text(hjust = 0))
-
-
-# ggplot(peak_summary, aes(x=chromosome, y=cross_label, fill=AA)) +
-#   geom_point(aes(fill = AA, size = LOD), shape=22, colour='gray90') +
-#   geom_point(data = subset(peak_summary, missing_geno == 1), aes(shape="Missing parent genotype", color = 'gold', size=2)) +
-#   scale_fill_gradient2(low = "blue", mid = "white", high = "red", 
-#                        midpoint = 0, na.value = "grey60", name = "AA Effect") +
-#   scale_size(range=c(1,8), name='LOD') +
-#   scale_shape_manual(
-#     name = NULL,
-#     values = c("Missing parent genotype" = 8)
-#   ) +
-#   theme_minimal(base_size = 12) +
-#   labs(x = "Chromosome", y = "Cross") +
-#   theme(axis.text.x = element_text(angle = 60, hjust = 1),
-#         axis.text.y = element_text(hjust = 0))
-
 
 parentage_order <- pedigree[order(pedigree$Parent_2, decreasing=F),] %>% 
   mutate(cross_label = paste(Cross_ID,Parent_2, Parent_1, sep=" - ")) %>%
@@ -511,4 +488,137 @@ for (fam in pedigree$Cross_ID) {
   
   
   write.table(map, glue("linkage_map/monotonic/{fam}_GBS_monotonic.map"), quote=F, sep="\t", row.names=F, col.names=F)
+}
+
+
+
+
+### CREATE QTL HEATMAP WITH EFFECTS
+pks <- read.delim("outputs/qtl2_cim.tsv") %>%
+  mutate(phys_pos = round(as.numeric(sapply(strsplit(Pos, "_"), "[", 2))/1e6, 1),
+         chr = gsub("\\..", "", chr)) %>%
+  rename(chromosome = chr) %>%
+  arrange(chromosome, phys_pos) %>%
+  rename(Cross_ID = cross)
+cls <- chrom_lengths_split
+pks$chromosome <- apply(pks, 1, function(x) {y <- as.numeric(x[[17]])*1e6; cls[cls$Chromosome == x[[6]] & cls$Start <= y
+                                                                               & cls$End > y,'Arm']})
+##read in GWAS summary
+gwas_results <- read.delim("outputs/combined_GWAS.tsv") %>%
+  mutate(lod = -log10(P.value))
+gwas_results$chromosome <- apply(gwas_results, 1, function(x) {y <- as.numeric(x[[2]]); cls[cls$Chromosome == x[[1]] & cls$Start <= y
+                                                                                            & cls$End > y,'Arm']})
+gwas_results <- select(gwas_results, c(Position, Chromosome, chromosome, trait, lod)) %>%
+  mutate(Cross_ID = 'GWAS', marker = glue("S{Chromosome}_{Position}") )
+genotype <- read.bed.matrix("data/SunRILs_imp_filtmerge")
+genotype <- select.snps(genotype, id %in% gwas_results$marker)
+blues <- read.delim("data/blues.csv", sep=",") %>%
+  mutate(Cross_ID = as.factor(Cross_ID)) %>% 
+  rename(id = Entry)
+genotype <- select.inds(genotype, id %in% blues$id)
+geno <- cbind(id = genotype@ped$id, as.matrix(genotype)) %>%
+  data.frame() 
+
+plot_qtl_heatmap <- function(pks, gwas_results, geno, blues, trt) {
+  selection <- c('id', trt)
+  geno_long <-data.frame(geno) %>%
+    inner_join(blues[,selection], by = "id") %>%
+    pivot_longer(cols = -c(selection), names_to = "marker", values_to = "genotype")
+  
+  # 2. Compute means per marker/genotype
+  geno_summary <- geno_long %>%
+    group_by(marker, genotype) %>%
+    dplyr::summarise(mean_blue := mean(.data[[trt]], na.rm = TRUE), .groups = "drop") %>%
+    pivot_wider(names_from = genotype, values_from = mean_blue, names_prefix = "mean_pheno_")
+  
+  # View the result
+  geno_centered <- geno_summary %>%
+    mutate(
+      midpoint = (mean_pheno_0 + mean_pheno_2) / 2,
+      adj_pheno_0 = mean_pheno_0 - midpoint,
+      adj_pheno_2 = mean_pheno_2 - midpoint
+    ) %>%
+    select(marker, adj_pheno_0, adj_pheno_2)
+  
+  gwas <- merge(dplyr::filter(gwas_results, trait == trt), geno_centered, by= 'marker', all=T) %>%
+    rename(Pos = marker, AA = adj_pheno_0, BB = adj_pheno_2)
+  
+  pks1 <- merge(pks, gwas, by=intersect(names(pks), names(gwas)), all=T) %>%
+    filter(trait == trt)
+  
+  peak_summary <- as.data.table(pks1)[, {
+    idx <- which.max(abs(AA))
+    .(
+      effect_peak = pos[idx],
+      phys_pos = phys_pos[idx],
+      LOD = lod[idx],
+      AA = AA[idx],
+      BB = BB[idx],
+      NC08 = NC08[idx],
+      HILLIARD = HILLIARD[idx],
+      GA13LE6 = GA13LE6[idx],
+      nmar = uniqueN(pos)
+    )
+  }, by = .(trait, chromosome, Cross_ID)]
+  
+  peak_summary1 <- merge(peak_summary, pedigree, by='Cross_ID') %>%
+    mutate(cross_label = paste(Cross_ID, Parent_2, Parent_1, sep=" - "))
+
+  #convert to NAM founder allele coding
+  peak_summary1 <- peak_summary1 %>%
+    rename("NC08-23383" = NC08,
+           "GA06493-13LE6" = GA13LE6) %>%
+    rowwise() %>%
+    mutate(
+      genotype_val = get(Parent_2),
+      missing_geno = ifelse(is.na(genotype_val), 1, 0),
+    ) %>%
+    ungroup() %>%
+    select(-genotype_val)
+  
+  peak_summary2 <- filter(peak_summary, Cross_ID == 'GWAS') %>%
+    mutate(cross_label = 'GWAS')
+  peak_summary <- merge(peak_summary2, peak_summary1, 
+                        by=intersect(names(peak_summary2), names(peak_summary1)), all=T) %>%
+    mutate(chromosome = factor(chromosome, levels = cls$Arm))
+  
+  parentage_order <- pedigree[order(pedigree$Parent_2, decreasing=F),] %>% 
+    mutate(cross_label = paste(Cross_ID,Parent_2, Parent_1, sep=" - ")) %>%
+    select(cross_label) %>% as.vector
+  peak_summary <- mutate(peak_summary, cross_label = factor(cross_label, levels = c( "GWAS", rev(parentage_order[[1]]))))
+  
+  ggplot(peak_summary, aes(x = chromosome, y = cross_label, fill = AA)) +
+    geom_point(aes(fill = AA, size = LOD), shape = 22, colour = 'gray90') +
+    
+    # Create a factor for the legend and map it to shape
+    geom_point(
+      data = subset(peak_summary, missing_geno == 1),
+      aes(shape = "Missing parent genotype"),
+      size = 2
+    ) +
+    
+    scale_fill_gradient2(
+      low = "blue", mid = "white", high = "red", 
+      midpoint = 0, na.value = "grey60", name = "AA Effect"
+    ) +
+    scale_size(range = c(1, 8), name = 'LOD') +
+    scale_shape_manual(
+      name = NULL,
+      values = c("Missing parent genotype" = 21)
+    ) +
+    
+    theme_minimal(base_size = 12) +
+    labs(x = "Chromosome", y = "Cross", title = glue("QTL effect for {trt}")) +
+    theme(
+      axis.text.x = element_text(angle = 60, hjust = 1),
+      axis.text.y = element_text(hjust = 0),
+      legend.box = "vertical",
+      legend.position = "right"
+    )
+  
+  ggsave(file=glue("figures/QTL_heatmap_chromArm_{trt}.png"), width=12, height=5)
+}
+
+for (trt in c('WDR', "HD", "PM", "Height")) {
+  plot_qtl_heatmap(pks, gwas_results, geno, blues, trt)
 }

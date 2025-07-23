@@ -11,7 +11,8 @@ setwd(here())
 
 blues <- read.delim("data/blues.csv", sep=",") %>%
   mutate(Cross_ID = as.factor(Cross_ID))
-genotype <- read.vcf("data/SunRILs_prod_filt_imp.vcf.gz", convert.chr=F)
+# genotype <- read.vcf("data/SunRILs_prod_filt_imp.vcf.gz", convert.chr=F)
+genotype <- read.bed.matrix("data/SunRILs_imp_filtmerge")
 
 ##take smallest biparental and get proportion of whole pop
 ##then multiply by reasonable MAF for F4 genotyped individuals
@@ -36,7 +37,7 @@ blues <- filter(blues, Entry %in% genotype@ped$id) %>%
 #   rename(marker = id, chrom = chr)
 
 
-bonf_threshold <- (0.1 / ncol(genotype))
+bonf_threshold <- (0.2 / ncol(genotype))
 
 for (trait in colnames(blues)[-c(1:2)]) {
   ##preprocess for gwas
@@ -46,13 +47,11 @@ for (trait in colnames(blues)[-c(1:2)]) {
                        min.MAF=MAF_threshold,
                        #plot=F
                        )
-  
-  # gtable <- gwas$gwas.sel
   colnames(gwas)[4] <- "p.value"
   gwas$p.value <- 10^-gwas$p.value
   gwas <- filter(gwas, p.value <= bonf_threshold)
   gwas$trait <- trait
-  if (exists("rrBLUP_table")) {rrBLUP_table <- rbind(rrBLUP_table, gwas)} else {rrBLUP_table <- gwas}
+  if (exists("rrBLUP_table") & nrow(gwas) > 1) {rrBLUP_table <- rbind(rrBLUP_table, gwas)} else {rrBLUP_table <- gwas}
 }
 
 write.table(rrBLUP_table, "outputs/rrBLUP_gwas.tsv", quote=F, sep="\t", row.names=F)

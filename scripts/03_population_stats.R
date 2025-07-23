@@ -16,17 +16,19 @@ setwd(here())
 source("C:/Users/nalara/Documents/GitHub/Drone_2023/analysis/palette_functions.R")
 
 ###read in complete, imputed, unfiltered vcf file for populations
-genotype <- read.vcf("data/SunRILs_prod_filt_imp.vcf.gz", convert.chr=F)
-genotype@ped$family <- ifelse(grepl("UX", genotype@ped$id), str_sub(genotype@ped$id, 1, 6), 'Parent')
+# genotype <- read.vcf("data/SunRILs_prod_filt_imp.vcf.gz", convert.chr=F)
+genotype <- read.bed.matrix("data/SunRILs_imp_filtmerge")
+
+# genotype@ped$famid <- ifelse(grepl("UX", genotype@ped$id), str_sub(genotype@ped$id, 1, 6), 'Parent')
 
 ###read in population information
-cross_info <- pedigree <- read.csv("data/cross_info.csv")
+cross_info <- pedigree <- read.csv("data/cross_info.csv", header=F, col.names = c("Cross_ID", "Parent_1", "Parent_2"))
 
 ###read in BLUPs for traits of interest
 blues <- read.delim("data/blues.csv", sep=",") %>%
   mutate(Cross_ID = as.factor(Cross_ID))
 ##filter
-genotype <- select.inds(genotype, family %in% blues$Cross_ID)
+genotype <- select.inds(genotype, famid %in% blues$Cross_ID)
 
 
 ###creating palettes and other graphical parameters
@@ -72,19 +74,19 @@ groups$colors <- SunRILs_palette
 
 
 ##table of family contents
-genotyped <- genotype@ped %>% group_by(family) %>% count() %>% rename(Cross_ID = family, genotyped = n)
+genotyped <- genotype@ped %>% group_by(famid) %>% count() %>% rename(Cross_ID = famid, genotyped = n)
 phenotyped <- blues %>% group_by(Cross_ID) %>% count() %>% rename(phenotyped = n)
 pop_table <- merge(genotyped, phenotyped, by="Cross_ID" )
 pop_table <- merge(cross_info, pop_table, by="Cross_ID")
 
 ###Kinship Matrix viewing
-genotype_subset <- select.inds(genotype, family != 'Parent')
+genotype_subset <- select.inds(genotype, famid != 'Parent')
 ##create summarized matrix
 X <- t(as.matrix(genotype_subset))
 kinship <- popkin(X)
-k <- aggregate(kinship, list(Family = genotype_subset@ped$family), mean)
+k <- aggregate(kinship, list(Family = genotype_subset@ped$famid), mean)
 rownames(k) <- k[,1]
-k <- aggregate(t(k[-1]), list(Family = genotype_subset@ped$family), mean)
+k <- aggregate(t(k[-1]), list(Family = genotype_subset@ped$famid), mean)
 rownames(k) <- k[,1]
 k <- as.matrix(k[-1])
 ##set order
@@ -150,11 +152,11 @@ ggplot(pc.vars,
   geom_line() +
   labs(title='Scree plot of PC variances of marker data')
 ##make classifying group dataframe
-line.orig = select(genotype@ped, c(family, id))
+line.orig = select(genotype@ped, c(famid, id))
 data.for.PC.plot = data.frame(pcs$x) %>%
   mutate(id = row.names(pcs$x))
 data.for.PC.plot = merge(line.orig, data.for.PC.plot, by='id') %>%
-  rename(line = id, group = family) #%>%
+  rename(line = id, group = famid) #%>%
 data.for.PC.plot <- mutate(data.for.PC.plot, group = factor(group, levels = c(groups$Cross_ID, 'Parent')))
 ##visualize PCA grouping
 HIL <- data.for.PC.plot[data.for.PC.plot$line=="HILLIARD",1:4]
@@ -289,8 +291,8 @@ phenotype <- phenotype %>%
   dplyr::rename(HD = flowering, PM = Powdery_mildew)
 
 g <- select.inds(genotype, id %in% phenotype$Entry)
-# kinship <- gaston::GRM(g, autosome.only=F, chunk = 10)
-kinship <- G.matrix(M = as.matrix(g), method="VanRaden")$G
+kinship <- gaston::GRM(g, autosome.only=F, chunk = 10)
+# kinship <- G.matrix(M = as.matrix(g), method="VanRaden")$G
 ki <- solve(kinship)
 pheno_file <- filter(phenotype, Entry %in% genotype@ped$id)
 
@@ -346,7 +348,7 @@ chrom_lengths <- read.delim("data/chromosome_lengths.tsv")
 markers <- genotype@snps %>% select(id, chr, pos) %>% mutate(end = pos+1)
 snps <- markers %>%
   select(chr, pos) %>%
-  rename(Chr = chr, Position = pos)
+  dplyr::rename(Chr = chr, Position = pos)
 
 # Define bin size
 bin_size <- 5e6  # 1 Mb bins

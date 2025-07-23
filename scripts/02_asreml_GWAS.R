@@ -15,6 +15,7 @@ blues <- read.delim("data/blues.csv", sep=",") %>%
 # genotype <- read.vcf("data/processed_vcf/SunRILs_imp.vcf.gz", convert.chr=F)
 genotype <- read.bed.matrix("data/SunRILs_imp_filtmerge")
 
+# genotype <- select.inds(genotype, !(family %in% "UX1992"))
 # ##take smallest biparental and get proportion of whole pop
 # ##then multiply by reasonable MAF for F4 genotyped individuals
 # table(blues$Cross_ID)
@@ -37,7 +38,7 @@ geno.map <- genotype@snps %>%
   dplyr::select(id, chr, pos) %>%
   rename(marker = id, chrom = chr)
 
-bonf_threshold <- (0.1 / ncol(genotype))
+bonf_threshold <- (0.20 / ncol(genotype))
 
 for (trait in colnames(blues)[-c(1:2)]) {
   print(trait)
@@ -61,7 +62,7 @@ for (trait in colnames(blues)[-c(1:2)]) {
   manhattan.plot(gwas$gwas.all)
   gtable <- gwas$gwas.sel
   gtable$trait <- trait
-  if (exists("GWAS_table")) {GWAS_table <- rbind(GWAS_table, gtable)} else {GWAS_table <- gtable}
+  if (exists("GWAS_table") & nrow(gtable) > 1) {GWAS_table <- rbind(GWAS_table, gtable)} else {GWAS_table <- gtable}
 }
 
 write.table(GWAS_table, "outputs/asreml_gwas.tsv", quote=F, sep="\t", row.names=F)

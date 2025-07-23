@@ -23,7 +23,7 @@ rrBLUP <- read.delim("outputs/rrBLUP_gwas.tsv") %>%
   dplyr::rename(Position = pos, P.value = p.value) %>%
   mutate(Chromosome = match(chr, mapping))
 rrBLUP$model <- "rrBLUP"
-mlm_rerun <- read.delim("outputs/gapit_mlm_gwas_sig_markers_fixed.tsv")
+# mlm_rerun <- read.delim("outputs/gapit_mlm_gwas_sig_markers_fixed.tsv")
 
 
 
@@ -32,8 +32,8 @@ analysis <- rbind(mlm[,c("Chromosome", "Position", "P.value", "model", "trait")]
            blink[,c("Chromosome", "Position", "P.value", "model", "trait")],
            farmcpu[,c("Chromosome", "Position", "P.value", "model", "trait")],
            asrgwas[,c("Chromosome", "Position", "P.value", "model", "trait")],
-           rrBLUP[,c("Chromosome", "Position", "P.value", "model", "trait")],
-           mlm_rerun[,c("Chromosome", "Position", "P.value", "model", "trait")])
+           rrBLUP[,c("Chromosome", "Position", "P.value", "model", "trait")])#,
+           # mlm_rerun[,c("Chromosome", "Position", "P.value", "model", "trait")])
 analysis$Chromosome <- mapping[mapping=analysis$Chromosome]
 
 
@@ -45,7 +45,7 @@ analysis$trait <- sapply(analysis$trait, function(x) if (x %in% names(traits)) t
 analysis <- analysis %>% mutate(trait = factor(trait, levels=c("WDR", "HD", "PM", "Height")))
 
 ##subset down to more stringent marker set
-bonf_threshold <- (0.05 / 70000) ## total number of SNPs available
+bonf_threshold <- (0.05 / 60000) ## total number of SNPs available
 analysis <- filter(analysis, P.value <= bonf_threshold)
 
 write.table(analysis, "outputs/combined_GWAS.tsv", quote=F, sep="\t", row.names=F)
@@ -61,6 +61,7 @@ ggplot(analysis, aes(x = Position, y = -log10(P.value), color = model)) +
   theme_bw() +
   theme(panel.spacing = unit(0, "lines"), axis.text.x = element_text(angle = 60, hjust = 1)) +
   scale_x_continuous(breaks=c(0, 4e8, 8e8), limits=c(0, 1e9))
+ggsave("figures/gwas_peaks.png", plot = last_plot(), width = 12, height = 4)
 
 
 ## group markers into peaks
@@ -121,7 +122,7 @@ write.table(peak_summary, "outputs/peaks.tsv", quote=F, row.names=F, sep="\t")
 gwas <- ggplot(data.frame(peak_summary), aes(x = LOD_peak, y = LOD, color = trait)) +
   geom_point(size=1.5) +
   facet_grid(trait ~ chromosome, scales="free_y") +
-  labs(x = "Position", y = "-log10(P.value)", color = "Model") +
+  labs(x = "Position", y = "-log10(P.value)", color = "Trait") +
   theme_bw() +
   theme(panel.spacing = unit(0, "lines"), axis.text.x = element_text(angle = 60, hjust = 1)) +
   scale_x_continuous(breaks=c(0, 4e8, 8e8), limits=c(0, 1e9))
@@ -189,7 +190,7 @@ qtl_data <- output_QTL_summary %>%
   filter(!(is.na(LOD_peak))) %>% 
   unique()
 
-gene_data <- read.delim("outputs/peaks_annotated.csv", sep=",") %>% 
+gene_data <- read.delim("outputs/peaks_annotated.csv", sep="\t") %>% 
   dplyr::filter(!(is.na(gene_start))) %>% 
   dplyr::select(chromosome, gene_start, gene_end, Gene, Status) %>%
   mutate(gene_start = gene_start/1e6, gene_end = gene_end/1e6, text_color = ifelse(Status == "Present", "#000000", "#888888")) %>%

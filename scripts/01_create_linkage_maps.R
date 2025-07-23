@@ -21,12 +21,11 @@ blues <- read.delim("data/blues.csv", sep=",") %>%
   rename(genotype = Entry) %>%
   select(-Cross_ID)
 
-redone_fams <- c("UX1992")
-# for (fam in pedigree$Cross_ID) { ##original
-for (fam in redone_fams) {
+for (fam in pedigree$Cross_ID) { ##original
+# for (fam in redone_fams) {
   print(fam)
   # vcf <- read.vcf(glue("linkage_map/biparental_vcf/{fam}_subset.vcf.gz"), convert.chr =FALSE)
-  vcf <- read.vcf(glue("data/processed_vcf/SunRILs_raw_{fam}_subset_filt.vcf.gz"), convert.chr = F)
+  vcf <- read.vcf(glue("data/processed_vcf/SunRILs_raw_filt_{fam}_subset_filt.vcf.gz"), convert.chr = F)
   if (fam == "UX2031") {
     vcf@ped$id <- gsub("UX2031-99-", "UX2031-99", unique(vcf@ped$id))
   }
@@ -40,8 +39,8 @@ filter <- data.frame(popmiss = c(30, 30, 22.5, 27.5, 20, 25, 30, 25, 25, 27.5, 2
                      markmiss = c(0.5, .5, .65, .6, .55, .65, .4, .5, .55, .8, .75, .7, .7, .75, .7))
 rownames(filter) <- pedigree$Cross_ID
 
-redo_filter <- data.frame(popmiss = c(35),
-                          markmiss= c(.75))
+redo_filter <- data.frame(popmiss = c(40),
+                          markmiss= c(.85))
 rownames(redo_filter) <- redone_fams
 ##filter down the markers
 # for (fam in pedigree$Cross_ID) {

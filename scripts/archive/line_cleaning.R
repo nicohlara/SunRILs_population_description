@@ -10,7 +10,7 @@ vcf_u <- read.vcf("../SunRILs_raw.vcf.gz", convert.chr=F)
 vcf_u <- select.snps(vcf_u, chr != "UNKNOWN")
 chroms <- unique(vcf_u@snps$chr)
 # vcf <- select.snps(vcf, chr %in% sample(chroms)[1:7])
-nmarker <- 1000
+nmarker <- 5000
 nind <- 50
 totmarkers <- c()
 for (k in chroms) {
@@ -145,9 +145,18 @@ fishy4 <- c("UX2029-8", "UX2029-47", "UX2012-18", "UX2031-106", "UX1991-140", "U
             "UX2023-58", "UX1991-66", "UX1995-70",  "UX2026-265", "UX1995-31", "UX1997-9",
             "UX1997-62:2", "UX1992-302:1", "UX1992-302:2", "UX1992-20:1", "UX1992-20:2")
 
-removal <- c(fishy, fishy2, fishy3, fishy4)
+
+vcf5 <- select.inds(vcf1, !(id %in% removal) & (famid == "UX1992" | famid == 'Parent'))
+vcf <- vcf5
+
+UX1992_disconnect <- c(319, 294, 8, 336, 273, 303, 9, 216, 203, 56, 8, 16, 56, 211, 316, 319,
+                       303, 273, 9, 211, 336, 316)
+UX1992_remove <- grep(paste(paste0("UX1992-", c(319, 8, 336, 273, 303, 9, 56, 211, 316 ),":"), collapse="|"), vcf@ped$id, value=T)
+
+removal <- c(fishy, fishy2, fishy3, fishy4, UX1992_remove)
 
 keyfile <- read.delim("data/cladogram_keyfile.tsv")
 keyfile <- filter(keyfile, !(FullSampleName %in% removal))
 keyfile$FullSampleName <- sub(":.*", "", keyfile$FullSampleName)
+keyfile <- dplyr::filter(keyfile, !(Flowcell %in% c("2436449055", "2441621533")))
 write.table(keyfile, "data/cleaned_joined_keyfile.tsv", quote = F, row.names=F, sep="\t")
