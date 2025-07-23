@@ -88,18 +88,23 @@ workflow {
         | combine_markers
 
     // Step 6: collect all imputed subpop vcfs, filter by consensus markers and impute
-    //imp_vcfs = consensus_markers
-    //    .combine(subpops)
-    //    .map { input ->
-    //        def (cm, cross_id, vcf) = input
-    //        tuple(cm, cross_id, vcf)
-    //    }
-    //    | filter_vcf_to_consensus
-     //   .collectFile(name: 'vcf_list.txt', storeDir: false)
-    vcf_files = subpops
-        .map { cross_id, vcf -> vcf }
+    vcf_consensus = consensus_markers
+        .combine(subpops)
+        .map { input ->
+            def (cm, cross_id, vcf) = input
+            tuple(cm, cross_id, vcf)
+        }
+        | filter_vcf_to_consensus
+        .collect()
+    
+    vcf_output = vcf_consensus
         .collect()
         | merge_vcf
+
+    //vcf_files = subpops
+    //    .map { cross_id, vcf -> vcf }
+    //    .collect()
+    //    | merge_vcf
     //    | generate_vcf_list  
 
     //merge_vcf(vcf_files)
@@ -161,6 +166,8 @@ process tassel_discovery_and_production {
 }
 
 process fix_tassel_vcf {
+    publishDir ${params.output_dir}", mode: 'copy'
+
     input:
     path vcf
 
@@ -208,15 +215,14 @@ process bcftools_fullfilter {
     path vcf
 
     output:
-    path "${sample}_filt.vcf.gz"
+    path "${params.study}_filtered.vcf.gz"
 	
     script:
-    sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
     """
     bcftools view -i 'FORMAT/DP > ${params.depth} && 'FORMAT/GQ' >= ${params.quality} && MAF > ${params.baseline_MAF} && F_MISSING < ${params.baseline_missing}' ${vcf} -Oz -o DP_MAF_MISS_filter.vcf.gz
     bcftools view -m2 -M2 -v snps DP_MAF_MISS_filter.vcf.gz -Oz -o biallelic.vcf.gz
     bcftools index -c biallelic.vcf.gz
-    bcftools view -t "^UNKNOWN" biallelic.vcf.gz -Oz -o "${sample}_filt.vcf.gz"
+    bcftools view -t "^UNKNOWN" biallelic.vcf.gz -Oz -o "${params.study}_filtered.vcf.gz"
     
     ##create table of marker numbers
     echo -e "VCF File\tTotal Markers" > filtering_marker_table.txt
@@ -238,7 +244,6 @@ process split_by_subpop {
     path("*_subset.vcf.gz")
 	
     script:
-    sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
     """
     # Index vcf
     bcftools index ${vcf}
@@ -259,7 +264,7 @@ process split_by_subpop {
         
         grep -Fxf temp_list.txt all_samples.txt > "\${Cross_ID}_list.txt"
 
-        bcftools view -S \${Cross_ID}_list.txt ${vcf} -Oz -o ${sample}_\${Cross_ID}_subset.vcf.gz
+        bcftools view -S \${Cross_ID}_list.txt ${vcf} -Oz -o ${params.study}_\${Cross_ID}_subset.vcf.gz
     done < subset_pop_table.txt
 
     ls -l *.vcf.gz || echo "No matching VCFs created."
@@ -275,12 +280,13 @@ process bcftools_filter {
 
     output:
     //path "${sample}_filt.vcf.gz"
-    tuple val(cross_id), path("${sample}_filt.vcf.gz")
+    //tuple val(cross_id), path("${sample}_filt.vcf.gz")
+    tuple val(cross_id), path("${cross_id}_filt.vcf.gz")
 	
     script:
-    sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
+    //sample = vcf.getBaseName().replaceAll(/\.vcf(\.gz)?$/, "")
     """
-    bcftools view -i 'MAF > ${params.MAF} && F_MISSING < ${params.missing}' ${vcf} -Oz -o "${sample}_filt.vcf.gz"
+    bcftools view -i 'MAF > ${params.MAF} && F_MISSING < ${params.missing}' ${vcf} -Oz -o "${cross_id}_filt.vcf.gz"
     """
 }
 
@@ -379,7 +385,8 @@ process merge_vcf {
 
     script:
     """
-    ls ./*imp.vcf.gz > vcf_list.txt
+    #ls ./*imp.vcf.gz > vcf_list.txt
+    ls ./*consensus.vcf.gz > vcf_list.txt
     cat vcf_list.txt
     while read file; do
         bcftools index -f "\${file}" 
