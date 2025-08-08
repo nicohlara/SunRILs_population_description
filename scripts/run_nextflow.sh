@@ -19,3 +19,5 @@ export _JAVA_OPTIONS="-Xmx350G"
 
 #nextflow scripts/00_vcf_preprocess_combine.nf -resume
 nextflow run scripts/00_create_genotype_files.nf -resume
+
+squeue -j $SLURM_JOBID

@@ -8,7 +8,7 @@ params.output_dir = "${params.basedir}/data/processed_vcf"
 // discovery and production parameters
 params.fastq_dir = "/90daydata/guedira_seq_map/nico/fastq/"
 params.study = "SunRILs"
-params.keyfile = "${params.basedir}/data/cleaned_joined_keyfile.tsv"
+params.keyfile = "${params.basedir}/data/SunRILs_keyfile_20250804"
 params.ref = "/90daydata/guedira_seq_map/RefCS_2.1/iwgsc_refseqv2.1_assembly.fa"
 params.enzymes = "PstI-MspI"
 params.taglength = "85"
@@ -74,24 +74,28 @@ workflow {
 	| beagle_impute
 
     // Find consensus markers, subset biparental vcf
-    marker_files = subpops
-        | extract_markers
+    //marker_files = subpops
+    //    | extract_markers
 
-    consensus_markers = marker_files
-        .collect()
-        | combine_markers
+    //consensus_markers = marker_files
+    //    .collect()
+    //    | combine_markers
 
-    vcf_consensus = consensus_markers
-        .combine(subpops)
-        .map { input ->
-            def (cm, cross_id, vcf) = input
-            tuple(cm, cross_id, vcf)
-        }
-        | filter_vcf_to_consensus
-        .collect()
+    //vcf_consensus = consensus_markers
+    //    .combine(subpops)
+    //    .map { input ->
+    //        def (cm, cross_id, vcf) = input
+    //        tuple(cm, cross_id, vcf)
+    //    }
+    //   | filter_vcf_to_consensus
+    //    .collect()
 
     // Combine final subset biparental vcf and impute any remaining missing values    
-    vcf_output = vcf_consensus
+    //vcf_output = vcf_consensus
+    //    .collect()
+    //    | merge_vcf
+    vcf_files = subpops
+        .map { cross_id, vcf -> vcf }
         .collect()
         | merge_vcf
 }
@@ -152,7 +156,7 @@ process tassel_discovery_and_production {
 }
 
 process fix_tassel_vcf {
-    publishDir ${params.output_dir}", mode: 'copy'
+    publishDir "${params.output_dir}", mode: 'copy'
 
     input:
     path vcf
@@ -338,7 +342,7 @@ process merge_vcf {
 
     script:
     """
-    ls ./*consensus.vcf.gz > vcf_list.txt
+    ls ./*imp.vcf.gz > vcf_list.txt
     cat vcf_list.txt
     while read file; do
         bcftools index -f "\${file}" 
