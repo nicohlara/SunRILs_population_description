@@ -36,13 +36,13 @@ light_hue = "white"
 dark_hue = "#303D7C"
 
 monochrome_palette <- colorRampPalette(c(light_hue, dark_hue))(100)
-index <- c(seq(1,40, by=1), seq(41, 89, by=3), seq(90, 100, by=1))
-index <- c(rep(1, 5),
-           seq(2, 10, by=1),
-           seq(11, 84, by=10),
-           seq(90, 100, by=2))
-mono_ramp_palette <- monochrome_palette[index]
+index <- c(seq(1,10, by=1), seq(10, 20, by=5), seq(20, 100, by=2))
+# index <- c(rep(1, 5),
+#            seq(2, 10, by=1),
+#            seq(11, 84, by=10),
+#            seq(90, 100, by=2))
 
+mono_ramp_palette <- monochrome_palette[index]
 
 ##ordering families
 ##set order

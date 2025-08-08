@@ -20,7 +20,8 @@ for (k in chroms) {
 vcf1 <- select.snps(vcf_u, id %in% totmarkers)
 
 vcf1@ped$famid <- ifelse(grepl("UX", vcf1@ped$id), sub("\\-.*", "", vcf1@ped$id), "Parent")
-totinds <- grep("\\:", vcf1@ped$id, value=T)
+# totinds <- grep("\\:", vcf1@ped$id, value=T)
+totinds <- grep("UX2029", vcf1@ped$id, value=T)
 for (f in unique(vcf1@ped$famid)) {
   inds <- vcf1@ped[vcf1@ped$famid == f, 'id']
   inds <- grep("\\:", inds, value=T, invert = T)
@@ -136,7 +137,7 @@ p <- ggtree(phylo) %<+% tip_metadata +  # %<+% joins metadata
   theme(legend.position = "right")
 
 print(p)
-ggsave("figures/full_cladogram.png", scale=1, limitsize=F, width=16, height = 160, dpi=300)
+ggsave("figures/cladogram.png", scale=1, limitsize=F, width=16, height = 160, dpi=300)
 
 fishy3 <- c("UX2029-8", "UX2029-47", "UX2023-41", "UX2010-68", "UX2010-140", "UX1991-85",
             "UX2031-46", "UX2023-58", "UX1991-66", "UX2026-265", "UX2026-230", "UX2026-206", "UX2026-207",
