@@ -73,27 +73,6 @@ workflow {
         | bcftools_filter
 	| beagle_impute
 
-    // Find consensus markers, subset biparental vcf
-    //marker_files = subpops
-    //    | extract_markers
-
-    //consensus_markers = marker_files
-    //    .collect()
-    //    | combine_markers
-
-    //vcf_consensus = consensus_markers
-    //    .combine(subpops)
-    //    .map { input ->
-    //        def (cm, cross_id, vcf) = input
-    //        tuple(cm, cross_id, vcf)
-    //    }
-    //   | filter_vcf_to_consensus
-    //    .collect()
-
-    // Combine final subset biparental vcf and impute any remaining missing values    
-    //vcf_output = vcf_consensus
-    //    .collect()
-    //    | merge_vcf
     vcf_files = subpops
         .map { cross_id, vcf -> vcf }
         .collect()
@@ -282,52 +261,6 @@ process beagle_impute {
             map=${params.monotonic}/consensus_GBS_monotonic.map \
             nthreads=40 \
             window=350
-    """
-}
-
-process extract_markers {
-    input:
-    tuple val(cross_id), path(vcf)
-    
-    output:
-    path("${cross_id}_markers.txt")
-
-    script:
-    """
-    bcftools index ${vcf}
-    bcftools query -f '%ID\n' ${vcf} > "${cross_id}_markers.txt"
-    """
-}
-
-process combine_markers {
-    input:
-    path(marker_files)
-
-    output:
-    path "concensus_markers.txt"
-
-    script:
-    """
-    #!/usr/bin/env Rscript
-    id_files <- list.files(".", pattern="_markers.txt", full.names=TRUE)
-    id_lists <- lapply(id_files, function(file) read.delim(file, header=FALSE)[[1]])
-    id_counts <- table(unlist(id_lists))
-    id_majority <- names(id_counts[id_counts > length(id_lists) * ${params.consensus_overlap}])
-    write.table(id_majority, "concensus_markers.txt", sep="\\t", quote = F, row.names=F, col.names=F)
-    """
-}
-
-process filter_vcf_to_consensus {
-    input:
-    tuple path(consensus_markers), val(cross_id), path(vcf)
-
-    output:
-    path "${cross_id}_consensus.vcf.gz"
-
-    script:
-    """
-    bcftools view -i 'ID=@${consensus_markers}' -Oz -o "${cross_id}_consensus.vcf.gz" ${vcf}
-    bcftools index "${cross_id}_consensus.vcf.gz"
     """
 }
 
