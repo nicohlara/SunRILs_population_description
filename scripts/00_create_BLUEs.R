@@ -78,3 +78,14 @@ blues <- blues[c(ncol(blues), 1:(ncol(blues)-1))]
 blues <- blues %>% rename(HD = flowering, PM = Powdery_mildew)
 
 write.table(blues, "C:/Users/nalara/Documents/GitHub/SunRILs_population/data/blues.csv", quote=F, sep=",", row.names=F)
+
+
+
+##number of records for each phenotype
+for (trt in traits$trait) {
+  selection <- c("Location", "Year", trt)
+  trt_df <- select(phenotype, all_of(selection)) %>%
+    filter(!is.na(trt))
+  print(trt)
+  print(table(paste0(trt_df$Location, trt_df$Year)))
+}

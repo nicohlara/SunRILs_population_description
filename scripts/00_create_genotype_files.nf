@@ -17,15 +17,17 @@ params.ram = "300g"
 params.tassel_run = "/90daydata/guedira_seq_map/nico/UX1992_reseq_calling/HPC-GBS-Pipeline/tassel-5-standalone/run_pipeline.pl"
 
 // bcftools full population filtering parameters
-params.depth = '3'
+params.depth_lower = '3'
+params.depth_upper = '100'
 params.quality = '20'
-params.baseline_MAF = '0.002'
-params.baseline_missing = '0.4'
 
 // bcftools biparental filtering parameters
-params.MAF = '0.05'
-params.missing = '0.4'
-params.consensus_overlap = '0.5'
+params.parent_callrate = '0.8'
+params.MAF = '0.3'
+params.missing = '0.5'
+params.marker_het = '0.2'
+params.sample_het = '0.2'
+
 
 // imputation parameters
 params.monotonic = "${params.basedir}/linkage_map/monotonic"
@@ -46,9 +48,13 @@ workflow {
     // Discovery and production
     raw_vcf = tassel_discovery_and_production(fastq_dir)
 	| fix_tassel_vcf
+	
+	// Filter vcf
+	filt_vcf = bcftools_filter(raw_vcf)
+	    | biparental_filter
 
     // Filter vcf and combine filtered VCF with the population table
-    filt_vcf = bcftools_fullfilter(raw_vcf)
+    filt_vcf = bcftools_consensus_filter(filt_vcf)
 	    .combine(pop_table_ch)
 
     // Split filtered VCFs by subpopulations
@@ -70,8 +76,7 @@ workflow {
             println "Sending ${vcf} for imputation of ${cross_id}"
             tuple(cross_id, vcf)  // ensure tuple structure
         }
-        | bcftools_filter
-	| beagle_impute
+        | beagle_impute
 
     vcf_files = subpops
         .map { cross_id, vcf -> vcf }
@@ -176,7 +181,9 @@ process fix_tassel_vcf {
     """
 }
 
-process bcftools_fullfilter {
+process bcftools_filter {
+    publishDir "${params.output_dir}", mode: 'copy'
+
     input:
     path vcf
 
@@ -185,10 +192,62 @@ process bcftools_fullfilter {
 	
     script:
     """
-    bcftools view -i 'FORMAT/DP > ${params.depth} && 'FORMAT/GQ' >= ${params.quality} && MAF > ${params.baseline_MAF} && F_MISSING < ${params.baseline_missing}' ${vcf} -Oz -o DP_MAF_MISS_filter.vcf.gz
-    bcftools view -m2 -M2 -v snps DP_MAF_MISS_filter.vcf.gz -Oz -o biallelic.vcf.gz
+    bcftools view -i 'FORMAT/DP > ${params.depth_lower} && FORMAT/DP < ${params.depth_upper} && 'FORMAT/GQ' >= ${params.quality}' ${vcf} -Oz -o DP_filter.vcf.gz
+    bcftools view -m2 -M2 -v snps DP_filter.vcf.gz -Oz -o biallelic.vcf.gz
     bcftools index -c biallelic.vcf.gz
     bcftools view -t "^UNKNOWN" biallelic.vcf.gz -Oz -o "${params.study}_filtered.vcf.gz"
+    """
+}
+
+process biparental_filter {
+    input:
+    path vcf
+
+    output:
+    tuple path("${params.study}_filtered.vcf.gz"), path("consensus_markers.txt"), path("consensus_samples.txt")
+
+    script:
+    """
+	#!/usr/bin/env Rscript
+    library('gaston')
+    g <- read.vcf(${vcf}, convert.chr=F)
+    g@ped\$famid <- ifelse(grepl("UX", g@ped\$id), str_sub(g@ped\$id, 1, 6), 'Parent')
+    gt <- select.inds(g, famid == 'Parent')
+    gp <- select.snps(gt, callrate > ${params.parent_callrate})
+    g1 <- select.snps(g, id %in% gp@snps\$id)
+    g1 <- select.snps(g1, N1/nrow(g1) < ${params.marker_het}) 
+    g1 <- select.inds(g1, N1/ncol(g1) < ${params.sample_het})
+
+    variation_marker <- c()
+    for (fam in grep("UX", unique(g1@ped\$famid), value=T)) {
+      print(fam)
+      gt <- select.inds(g1, famid == fam)
+      gt <- select.snps(gt, NAs/nrow(gt) < ${params.missing}) 
+      g2 <- select.snps(g1, id %in% gt@snps\$id)
+      gt <- select.snps(gt, maf > ${params.MAF})
+      variation_marker <- unique(c(variation_marker, gt@snps\$id))
+    }
+    g3 <- select.snps(g2, id %in% variation_marker)
+    print(dim(g2)); print(dim(g3))
+	
+	write.table(g3@snps\$id, "concensus_markers.txt", sep="\\t", quote = F, row.names=F, col.names=F)
+	write.table(g3@ped\$id, "concensus_samples.txt", sep="\\t", quote = F, row.names=F, col.names=F)
+	"""
+}
+
+process bcftools_consensus_filter {
+    publishDir "${params.output_dir}", mode: 'copy'
+
+    input:
+    tuple path(vcf), path(consensus_markers), path(concensus_samples)
+
+    output:
+    path "${params.study}_consensus_filtered.vcf.gz"
+	
+    script:
+    """
+    bcftools view -S ${consensus_samples} ${vcf} -Oz -o vcf_filt.vcf.gz
+	bcftools view --include ID==@${concensus_samples} vcf_filt.vcf.gz  -Oz -o ${params.study}_consensus_filtered.vcf.gz
     """
 }
 
@@ -229,21 +288,6 @@ process split_by_subpop {
     """
 }
 
-process bcftools_filter {
-    publishDir "${params.output_dir}", mode: 'copy'
-
-    input:
-    tuple val(cross_id), path(vcf)
-
-    output:
-    tuple val(cross_id), path("${cross_id}_filt.vcf.gz")
-	
-    script:
-    """
-    bcftools view -i 'MAF > ${params.MAF} && F_MISSING < ${params.missing}' ${vcf} -Oz -o "${cross_id}_filt.vcf.gz"
-    """
-}
-
 process beagle_impute {
     memory '100 GB'
     time '24h'
@@ -281,7 +325,6 @@ process merge_vcf {
         bcftools index -f "\${file}" 
     done < vcf_list.txt
 
-    bcftools merge --file-list vcf_list.txt --force-samples -Oz -o SunRILs_imp.vcf.gz
-    beagle gt=SunRILs_imp.vcf.gz out=${params.study}_imp_filt map=${params.monotonic}/consensus_GBS_monotonic.map nthreads=40 window=350
+    bcftools merge --file-list vcf_list.txt --force-samples -Oz -o ${params.study}_imp_filt
     """
 }

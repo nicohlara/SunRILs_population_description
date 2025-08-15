@@ -37,7 +37,7 @@ blues <- filter(blues, Entry %in% genotype@ped$id) %>%
 #   rename(marker = id, chrom = chr)
 
 
-bonf_threshold <- (0.2 / ncol(genotype))
+bonf_threshold <- (0.1 / ncol(genotype))
 
 for (trait in colnames(blues)[-c(1:2)]) {
   ##preprocess for gwas

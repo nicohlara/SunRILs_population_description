@@ -1,6 +1,6 @@
 ###making final figures for the population manuscript
 ##Nicolas Lara
-##Last edit: 2025-5-19
+##Last edit: 2025-7-27
 
 library(here)
 library(tidyverse)
@@ -9,6 +9,7 @@ library(popkin)
 library(asreml)
 library(ASRgenomics)
 library(yarrr)
+library(glue)
 # library(AGHmatrix)
 
 setwd(here())
@@ -74,8 +75,8 @@ groups$colors <- SunRILs_palette
 
 
 ##table of family contents
-genotyped <- genotype@ped %>% group_by(famid) %>% count() %>% rename(Cross_ID = famid, genotyped = n)
-phenotyped <- blues %>% group_by(Cross_ID) %>% count() %>% rename(phenotyped = n)
+genotyped <- genotype@ped %>% group_by(famid) %>% count() %>% dplyr::rename(Cross_ID = famid, genotyped = n)
+phenotyped <- blues %>% group_by(Cross_ID) %>% count() %>% dplyr::rename(phenotyped = n)
 pop_table <- merge(genotyped, phenotyped, by="Cross_ID" )
 pop_table <- merge(cross_info, pop_table, by="Cross_ID")
 
@@ -156,7 +157,7 @@ line.orig = select(genotype@ped, c(famid, id))
 data.for.PC.plot = data.frame(pcs$x) %>%
   mutate(id = row.names(pcs$x))
 data.for.PC.plot = merge(line.orig, data.for.PC.plot, by='id') %>%
-  rename(line = id, group = famid) #%>%
+  dplyr::rename(line = id, group = famid) #%>%
 data.for.PC.plot <- mutate(data.for.PC.plot, group = factor(group, levels = c(groups$Cross_ID, 'Parent')))
 ##visualize PCA grouping
 HIL <- data.for.PC.plot[data.for.PC.plot$line=="HILLIARD",1:4]
@@ -173,7 +174,7 @@ ggplot(data.for.PC.plot, aes(x = PC1, y = PC2)) +
   annotate("text", x=NC08[,3] - 3, y=NC08[,4] +6, colour="maroon", label = "NC08-23383") + 
   xlab(paste0(pc.vars[1,'PC'], " ", round(pc.vars[1,'var']*100, 1), "%")) +
   ylab(paste0(pc.vars[2,'PC'], " ", round(pc.vars[2,'var']*100, 1), "%"))
-ggsave('figures/pca_plot.png')
+ggsave('figures/pca_plot.png', width=12, height=4)
 
 
 ##plot phenotypes
@@ -203,18 +204,28 @@ nf <- layout(matrix(c(1:4), 2,2 ,byrow=T),widths=rep(3.5, 4), heights = rep(1, 4
 par(mar=c(2,2,2,2))
 
 for (trait in colnames(blues)[-c(1:2)]) {
-  pp <- pirateplot(glue("{trait} ~ Cross_ID"), data=bls, plot=F)
+  pp <- pirateplot(glue("{trait} ~ Cross_ID"), data=blues, plot=F)
   fam_order <- pp$summary %>% arrange(avg)
   plot_blues <- blues %>%
     filter(Cross_ID != 'Parent') %>%
     mutate(Cross_ID = factor(Cross_ID, levels=fam_order$Cross_ID)) %>%
     arrange(Cross_ID)
-  groups <- groups %>% 
+  groups1 <- groups %>% 
     mutate(Cross_ID = factor(Cross_ID, levels=fam_order$Cross_ID)) %>%
     arrange(Cross_ID)
+  groups1 <- groups1 %>%
+    left_join(pedigree %>% select(Cross_ID, off_parent = Parent_1), by = "Cross_ID") %>%  
+    mutate(x = row.names(groups1)) %>%
+    left_join(blues %>% select(Entry, all_of(trait)) %>% rename(NAM = Entry), by="NAM") %>%
+    left_join(blues %>% select(Entry,  all_of(trait)) %>% rename(off_parent = Entry), by="off_parent")
+  groups1[groups1$NAM == "HILLIARD_GA06493-13LE6", glue("{trait}.x")] <- blues[blues$Entry == "HILLIARD", trait]
   pirateplot(glue("{trait} ~ Cross_ID"), data=plot_blues,
-             bean.f.col = groups$cols,
+             bean.f.col = groups1$cols,
              main=trait)
+  ##add in parent phenotype
+  points(groups1$x, groups1[,glue("{trait}.x")], col=groups1$cols, cex=3, pch=17)
+  groups1[groups1$NAM == "HILLIARD_GA06493-13LE6", 'cols'] <- "#313D7D"
+  points(groups1$x, groups1[,glue("{trait}.y")], col='white', cex=3, pch=18)
 }
 dev.off()
 
@@ -245,9 +256,6 @@ pirateplot(Height ~ Cross_ID, data=pb,
 # blues_grp <- filter(blues, Cross_ID != "UX1992") %>%
 #   merge(., groups, by="Cross_ID") %>%
 #   rbind(., UX1992a, UX1992b)
-
-
-
 
 
 ### calculate heritability
@@ -392,3 +400,28 @@ average_distances <- genotype@snps %>%
     avg_distance = mean(diff(pos)),
     n_markers = n()
   )
+
+
+##linkage heatmap of whole genome
+ld_geno <- LD.thin(genotype, threshold=0.8, max.dist=350e6)
+ld <- LD(ld_geno, c(1, ncol(ld_geno)))
+fived_markers <- grep("5D", colnames(ld), value=T)
+fived <- ld[,colnames(ld) == "S5D_463976571"]
+fived[fived > .1]
+tail(fived[order(fived)])
+
+ld5d <- ld[fived_markers, fived_markers]
+# 
+# # 
+# # nmarker <- 10
+# # nind <- 50
+# # totmarkers <- c()
+# # for (k in unique(genotype@snps$chr)) {
+# #   markers <- genotype@snps[genotype@snps$chr == k, 'id']
+# #   totmarkers <- c(totmarkers, markers[ seq(1, length(markers), length.out= nmarker)])
+# # }
+# # vcf1 <- select.snps(genotype, id %in% totmarkers)
+# chr_pos <- grep("1A", ld_geno@snps$chr)
+# 
+# ld1 <- LD(ld_geno, c(1, 823))
+# LD.plot(ld1, snp.positions = ld_geno@snps$pos[chr_pos[seq(1, length(chr_pos), by=10)]] )

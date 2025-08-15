@@ -10,6 +10,8 @@ library(ggplot2)
 library(gaston)
 library(stringr)
 library(tidyr)
+library(gridExtra)
+library(scales)
 source("scripts/linkage_map_helper_functions.R")
 
 setwd(here())
@@ -52,10 +54,32 @@ for (fam in pedigree$Cross_ID) {
   gt <- read.delim(glue("{out_file}_conv.csv"), sep=",")
   mt <- gt[grep("UX", gt$genotype, invert=T),]
   mt <- mt[!is.na(mt$index),]
-  mt2 <- gt[,!(mt[1,] == mt[2,] & mt[1,] != "-")]
-  write.table(mt2, file = glue("{out_file}_conv.csv"), quote = F, row.names = F, col.names = T, sep=",", na="")
+  missing_one_parent <- which((mt[1, ] == "-" | mt[2, ] == "-") & !(mt[1, ] == "-" & mt[2, ] == "-"))
+  mt_imputed <- mt
+  for (col in missing_one_parent) {
+    parent1 <- mt[1, col]
+    parent2 <- mt[2, col]
+    pop_calls <- gt[[col]][-c(1:2)]
+    pop_alleles <- unique(pop_calls[pop_calls != "-"])
+    if (length(pop_alleles) == 2) {
+      if (parent1 == "-" && parent2 %in% c("A", "B")) {
+        mt_imputed[1, col] <- ifelse(parent2 == "A", "B", "A")
+      } else if (parent2 == "-" && parent1 %in% c("A", "B")) {
+        mt_imputed[2, col] <- ifelse(parent1 == "A", "B", "A")
+      }
+    } else {
+      mt_imputed[1, col] <- NA
+      mt_imputed[2, col] <- NA
+    }
+  }
+  keep_markers <- !is.na(mt_imputed[1, ]) & !is.na(mt_imputed[2, ])
+  gt2 <- rbind(gt[c(1:2, grep("UX", gt$genotype)),keep_markers], mt_imputed)
+  # mt2 <- gt[,!(mt[1,] == mt[2,] & mt[1,] != "-")]
+  write.table(gt2, file = glue("{out_file}_conv.csv"), quote = F, row.names = F, col.names = T, sep=",", na="")
 }
 
+
+##note: UX2023 needs remaking
 for (fam in pedigree$Cross_ID) {
   print(fam)
   cross <- read.cross(format="csv",file=glue("linkage_map/maps/{fam}_linkage_map_conv.csv"),
@@ -70,7 +94,7 @@ for (fam in pedigree$Cross_ID) {
   for (trait in colnames(SunCross$pheno)[-1]) {
     sig_threshold <- summary(scan1perm(pr, SunCross$pheno[, trait], n_perm=1000, cores=0), alpha=c(0.1))
     out <- scan1(pr, SunCross$pheno[, trait])
-    pks <- find_peaks(out, SunCross$gmap, peakdrop=0.5, expand2markers=T, drop=0.5, threshold = 1.5)
+    pks <- find_peaks(out, SunCross$gmap, peakdrop=0.5, expand2markers=T, drop=0.5, threshold = sig_threshold)
     print(nrow(pks))
     if (nrow(pks) > 0 ) {
       Pos <- c()
@@ -110,6 +134,83 @@ peak_df <- merge(peak_df, peak_effects, by=c('Pos', 'cross', 'trait'))
 write.table(peak_df, file="outputs/qtl2_cim.tsv", quote=F, sep="\t", row.names=F)
 # peak_effects_subset <- peak_effects[paste0(peak_effects$Pos, peak_effects$cross, peak_effects$trait) %in% paste0(peaks$Pos, peaks$cross, peaks$trait),]
 # write.table(peak_effects, file="outputs/qtl2_cim_peak_effects.tsv", quote=F, sep="\t", row.names=F)
+
+## PLOT LOD, CHROMOSOME, AND LD HEATMAP
+trait <- 'PM'
+chr <- "1A"
+chr_lod <- out[grep(chr, rownames(out)), ,drop=FALSE]
+chr_map <- SunCross$gmap[[chr]]
+lod_df <- tibble(
+  marker = names(chr_map),
+  cM = unname(chr_map),
+  pos = as.numeric(sapply(strsplit(names(SunCross$gmap$'1A'), "_"), "[", 2)),
+  lod = as.numeric(chr_lod)
+)
+
+gmat <- SunCross$geno[[chr]]
+calc_ld_matrix <- function(mat) {
+  mat <- scale(mat, center = TRUE, scale = FALSE)  # mean-center genotypes
+  cor_mat <- cor(mat, use = "pairwise.complete.obs")
+  ld_mat <- cor_mat^2
+  return(ld_mat)
+}
+ld_matrix <- calc_ld_matrix(gmat)
+markers <- lod_df$pos[order(lod_df$pos)]
+ld_df <- expand.grid(
+  marker1 = markers,
+  marker2 = markers
+) %>%
+  filter(marker1 < marker2) %>%  # only unique pairs (lower triangle)
+  mutate(
+    index1 = match(marker1, markers),
+    index2 = match(marker2, markers),
+    offset = index2 - index1  # number of markers between
+  ) %>%
+  mutate(
+    x = (marker1 + marker2) / 2,
+    y = -offset,
+    ld = mapply(
+      function(m1, m2) ld_matrix[glue("S1A_{m1}"), glue("S1A_{m2}")],
+      marker1,
+      marker2))
+
+p1 <- ggplot(lod_df, aes(x = pos, y = lod)) +
+  geom_line(linewidth = 1.2, color = "#2c7fb8") +
+  labs(y = "LOD", x = NULL, title = glue("QTL Scan of {trait} on {chr} in {fam}")) +
+  theme_minimal(base_size = 12) +
+  theme(plot.margin = margin(10, 10, 0, 10))
+p2 <- ggplot(lod_df, aes(x = pos, y = 0)) +
+  geom_segment(aes(xend = pos, yend = 0.3), color = "black") +
+  geom_segment(aes(x = min(pos), xend = max(pos), y = 0, yend = 0), size = 1) +
+  theme_void() +
+  theme(plot.margin = margin(0, 10, 0, 10))
+p3 <- ggplot(ld_df, aes(x = x, y = y, fill = ld)) +
+  geom_point(shape = 21, size = 4, color =  "transparent") +
+  scale_fill_gradient(low = "white", high = "red", name = "ld") +
+  theme_minimal() +
+  labs(x = NULL, y = NULL) +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    legend.position = "right"
+  )
+p4 <- grid.arrange(p1, p2, p3, heights = c(3, 0.5, 5), ncol = 1)
+ggsave(glue("figures/QTL_scan_{chr}_{trait}_{fam}.png"), p4)
+
+
+
+##full heatmaps
+for (fam in pedigree$Cross_ID) {
+  print(fam)
+  cross <- read.cross(format="csv",file=glue("linkage_map/maps/{fam}_linkage_map_conv.csv"),
+                      estimate.map=FALSE, na.strings=c("-","NA"),
+                      genotypes=c("A","H","B"), crosstype="riself")
+  png(filename=glue("figures/linkage_heatmaps/{fam}.png"), width=750, height=700)
+  heatMap(cross, lmax=10)
+  dev.off()
+}
+
 
 # png(filename="figures/UX1995_1A_PM.png",
 #     width=750*3, height=300*3, res=72*3,

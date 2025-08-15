@@ -152,12 +152,14 @@ vcf <- vcf5
 
 UX1992_disconnect <- c(319, 294, 8, 336, 273, 303, 9, 216, 203, 56, 8, 16, 56, 211, 316, 319,
                        303, 273, 9, 211, 336, 316)
-UX1992_remove <- grep(paste(paste0("UX1992-", c(319, 8, 336, 273, 303, 9, 56, 211, 316 ),":"), collapse="|"), vcf@ped$id, value=T)
+# UX1992_remove <- grep(paste(paste0("UX1992-", c(319, 8, 336, 273, 303, 9, 56, 211, 316 ),":"), collapse="|"), vcf@ped$id, value=T)
+UX1992_remove <- paste0("UX1992-", c(319, 8, 336, 273, 303, 9, 56, 211, 316 ))
+
 
 removal <- c(fishy, fishy2, fishy3, fishy4, UX1992_remove)
 
 keyfile <- read.delim("data/cladogram_keyfile.tsv")
 keyfile <- filter(keyfile, !(FullSampleName %in% removal))
 keyfile$FullSampleName <- sub(":.*", "", keyfile$FullSampleName)
-keyfile <- dplyr::filter(keyfile, !(Flowcell %in% c("2436449055", "2441621533")))
-write.table(keyfile, "data/cleaned_joined_keyfile.tsv", quote = F, row.names=F, sep="\t")
+# keyfile <- dplyr::filter(keyfile, !(Flowcell %in% c("2436449055", "2441621533")))
+write.table(keyfile, "data/SNP_calling_cladoclean_aviti_illumina.tsv", quote = F, row.names=F, sep="\t")

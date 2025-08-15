@@ -45,7 +45,7 @@ analysis$trait <- sapply(analysis$trait, function(x) if (x %in% names(traits)) t
 analysis <- analysis %>% mutate(trait = factor(trait, levels=c("WDR", "HD", "PM", "Height")))
 
 ##subset down to more stringent marker set
-bonf_threshold <- (0.05 / 60000) ## total number of SNPs available
+bonf_threshold <- (0.05 / 58146) ## total number of SNPs available
 analysis <- filter(analysis, P.value <= bonf_threshold)
 
 write.table(analysis, "outputs/combined_GWAS.tsv", quote=F, sep="\t", row.names=F)
@@ -163,7 +163,7 @@ output_QTL_summary <- merge(peak_summary, qtl_gene_matches, by=c("trait", "chrom
 ##import various sources of gene info
 gene_names <- read.delim("data/iwgsc_refseqv2.1_geneID_names.txt") %>%
   dplyr::rename(gene_id = Gene.stable.ID, IWGSC_description = Gene.description) %>%
-  select(-"Source..gene.")
+  dplyr::select(-"Source..gene.")
 TGT_gene_desc <- read.delim("data/TGT_GDTable_20250508230759.csv", sep=",") %>%
   dplyr::rename(gene_id = Gene, TGT_description = Description) %>%
   dplyr::select(-c(Location, Expression))
@@ -190,7 +190,7 @@ qtl_data <- output_QTL_summary %>%
   filter(!(is.na(LOD_peak))) %>% 
   unique()
 
-gene_data <- read.delim("outputs/peaks_annotated.csv", sep="\t") %>% 
+gene_data <- read.delim("outputs/peaks_annotated.csv", sep=",") %>% 
   dplyr::filter(!(is.na(gene_start))) %>% 
   dplyr::select(chromosome, gene_start, gene_end, Gene, Status) %>%
   mutate(gene_start = gene_start/1e6, gene_end = gene_end/1e6, text_color = ifelse(Status == "Present", "#000000", "#888888")) %>%

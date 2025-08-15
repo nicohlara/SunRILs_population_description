@@ -36,7 +36,7 @@ geno_map <- select(genotype@snps, c(id, chr, pos)) %>%
 
 blues <- filter(blues, Taxa %in% geno$Taxa)
 
-bonf_threshold <- (0.2 / ncol(genotype))
+bonf_threshold <- (0.1 / ncol(genotype))
 
 ## run MLM model
 for (trait in colnames(blues)[-c(1)]) {

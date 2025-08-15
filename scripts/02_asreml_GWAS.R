@@ -38,7 +38,7 @@ geno.map <- genotype@snps %>%
   dplyr::select(id, chr, pos) %>%
   rename(marker = id, chrom = chr)
 
-bonf_threshold <- (0.20 / ncol(genotype))
+bonf_threshold <- (0.10 / ncol(genotype))
 
 for (trait in colnames(blues)[-c(1:2)]) {
   print(trait)

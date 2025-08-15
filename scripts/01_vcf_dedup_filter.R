@@ -52,9 +52,11 @@ for (parent in unique(c(pedigree$Parent_1, pedigree$Parent_2))) {
 genotype1 <- select.inds(genotype, id %in% blues$Entry)
 # ##filter SNPs
 genotype2 <- select.snps(genotype1, callrate == 1)
-genotype3 <- select.snps(genotype2, N1/nrow(genotype2) < .2)
+hist(genotype2@snps$N1/nrow(genotype2))
+genotype3 <- select.snps(genotype2, N1/nrow(genotype2) < .2) #could go to .2 without issue
 #filter lines
-genotype4 <- select.inds(genotype3, N1/ncol(genotype3) < 0.2)
+hist(genotype3@ped$N1/ncol(genotype3))
+genotype4 <- select.inds(genotype3, N1/ncol(genotype3) < 0.15) #could go to 0.1 or 0.15 without issue
 genotype5 <- select.inds(genotype4, NAs/ncol(genotype4) == 0)
 genotype5 <- select.inds(genotype5, !(id %in% paste0("UX1992-", c(319, 8, 336, 273, 303, 9, 56, 211, 316 ))))
 ##LD thin
@@ -62,6 +64,26 @@ genotype5 <- select.inds(genotype5, !(id %in% paste0("UX1992-", c(319, 8, 336, 2
 
 
 
-dim(genotype); dim(genotype1); dim(genotype2); dim(genotype3); dim(genotype4); dim(genotype5); dim(genotype6)
+dim(genotype); dim(genotype1); dim(genotype2); dim(genotype3); dim(genotype4); dim(genotype5)
 
 write.bed.matrix(genotype5, "data/SunRILs_imp_filtmerge")
+
+
+
+g <- read.vcf("data/processed_vcf/SunRILs_raw.vcf.gz", convert.chr=F)
+g@ped$famid <- ifelse(grepl("UX", g@ped$id), str_sub(g@ped$id, 1, 6), 'Parent')
+
+# g1 <- select.snps(g, maf > 0.011)
+gt <- select.inds(g, famid == 'Parent')
+gp <- select.snps(gt, callrate > 0.9)
+g1 <- select.snps(g, id %in% gp@snps$id)
+g1 <- select.snps(g1, N1/nrow(g1) < 0.2) 
+g1 <- select.inds(g1, N1/ncol(g1) < 0.2)
+
+
+for (fam in grep("UX", unique(g1@ped$famid), value=T)) {
+  print(fam)
+  gt <- select.inds(g1, famid == fam)
+  gt <- select.snps(gt, maf > 0.3)
+  g2 <- select.snps(g1, id %in% gt@snps$id)
+}

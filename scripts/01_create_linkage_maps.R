@@ -16,7 +16,7 @@ source("scripts/linkage_map_helper_functions.R")
 ##Phenotype needs to be incorporated BEFORE creating a cross object or it doesn't seem to line up properly
 
 ### Coerce all vcf files to cross objects
-pedigree <- read.delim("data/cross_info.csv", sep=",")
+pedigree <- read.delim("data/cross_info.csv", sep=",", header=F, col.names = c("Cross_ID", "Parent_1", "Parent_2"))
 blues <- read.delim("data/blues.csv", sep=",") %>%
   rename(genotype = Entry) %>%
   select(-Cross_ID)
@@ -25,30 +25,37 @@ for (fam in pedigree$Cross_ID) { ##original
 # for (fam in redone_fams) {
   print(fam)
   # vcf <- read.vcf(glue("linkage_map/biparental_vcf/{fam}_subset.vcf.gz"), convert.chr =FALSE)
-  vcf <- read.vcf(glue("data/processed_vcf/SunRILs_raw_filt_{fam}_subset_filt.vcf.gz"), convert.chr = F)
-  if (fam == "UX2031") {
-    vcf@ped$id <- gsub("UX2031-99-", "UX2031-99", unique(vcf@ped$id))
-  }
+  vcf <- read.vcf(glue("data/processed_vcf/{fam}_filt.vcf.gz"), convert.chr = F)
   genotype <- as.data.frame(as.matrix(vcf), stringAsFactors = F) 
   cross <- convert_vcf_to_cross(genotype, blues)
   # cross <- convert_vcf_to_cross(vcf, blues)
   write.csv(cross, glue("linkage_map/cross_objects/{fam}_rqtl.csv"), row.names=FALSE)
 }
 
-filter <- data.frame(popmiss = c(30, 30, 22.5, 27.5, 20, 25, 30, 25, 25, 27.5, 27.5, 30, 25, 25, 35),
-                     markmiss = c(0.5, .5, .65, .6, .55, .65, .4, .5, .55, .8, .75, .7, .7, .75, .7))
+##read in and create histograms for setting filter thresholds
+for (fam in pedigree$Cross_ID) {
+  SunCross<- read.cross(format="csv",file=glue("linkage_map/cross_objects/{fam}_rqtl.csv"),
+                        estimate.map=FALSE, na.strings=c("-","NA"),
+                        genotypes=c("A","H","B"), crosstype="riself")
+  pg <- profileGen(SunCross, bychr=F, stat.type=c("miss", "dxo", "xo"), id = 'genotype')
+  hist(pg$stat$miss, main=glue("Histogram of missingness per individuals in {fam}"))
+  nt.bymar <- ntyped(SunCross, 'mar')
+  hist(nt.bymar/length(SunCross$pheno$genotype), main=glue("Histogram of missingness per marker in {fam}"))
+}
+
+
+filter <- data.frame(family = c("UX1989", "UX1991", "UX1992", "UX1993", "UX1994", "UX1995", "UX1997", "UX2000", "UX2010", "UX2012", "UX2013", "UX2023", "UX2026", "UX2029", "UX2031"),
+                    popmiss = c( 17.5,     20,       20,       17.5,     12.5,       20,       20,       22.5,     25,      22.5,       20,     22.5,     20,       20,       22.5),
+                     markmiss =c(0.65,    .6,        .7,       .55,      .55,       .7,       .6,       .65,      .65,      .7,      .65,      .7,       .65,       .7,       .7))
 rownames(filter) <- pedigree$Cross_ID
 
-redo_filter <- data.frame(popmiss = c(40),
-                          markmiss= c(.85))
-rownames(redo_filter) <- redone_fams
+redo <- c("UX1994")
+# fam <- pedigree$Cross_ID[15]
 ##filter down the markers
 # for (fam in pedigree$Cross_ID) {
-for (fam in redone_fams) {
-  # pop_missing <- filter[fam, 'popmiss']*1000
-  # miss_threshold <- filter[fam, 'markmiss']
-  pop_missing <- redo_filter[fam, 'popmiss']*1000
-  miss_threshold <- redo_filter[fam, 'markmiss']
+for (fam in redo) {
+  pop_missing <- filter[fam, 'popmiss']*1000
+  miss_threshold <- filter[fam, 'markmiss']
   SunCross<- read.cross(format="csv",file=glue("linkage_map/cross_objects/{fam}_rqtl.csv"),
                         estimate.map=FALSE, na.strings=c("-","NA"),
                         genotypes=c("A","H","B"), crosstype="riself")
@@ -56,6 +63,8 @@ for (fam in redone_fams) {
   pg <- profileGen(SunCross, bychr=F, stat.type=c("miss", "dxo", "xo"), id = 'genotype')
   # hist(pg$stat$miss)
   SunCross1 <- subsetCross(SunCross, ind = pg$stat$miss < pop_missing)
+  print(fam)
+  print(c(nind(SunCross), nind(SunCross1)))
   ##filter by markers
   nt.bymar <- ntyped(SunCross1, 'mar')
   # hist(nt.bymar/length(SunCross1$pheno$genotype))
@@ -66,8 +75,8 @@ for (fam in redone_fams) {
                       "bonf", type = "l", cex = 0.25)
   SunCross4 <- drop.markers(SunCross3, rownames(pm$marker[pm$marker$crit.val == FALSE,]))
   
-  print(fam)
-  print(c(totmar(SunCross), totmar(SunCross1), totmar(SunCross2), totmar(SunCross3), totmar(SunCross4)))
+  
+  print(c(totmar(SunCross), totmar(SunCross2), totmar(SunCross3), totmar(SunCross4)))
   print("")
   write.cross(SunCross4, "csv", filestem=glue("linkage_map/filt_premap/{fam}_filtered"))
 }
@@ -77,16 +86,17 @@ for (fam in redone_fams) {
 # rownames(power) <- pedigree$Cross_ID
 stats <- list()
 
+fam <- pedigree$Cross_ID[2]
+
 ##make maps
-# for (fam in pedigree$Cross_ID[-c(1:7)]) {
-for (fam in redone_fams) {
+for (fam in pedigree$Cross_ID) {
   print(fam)
-  SunCross<- read.cross(format="csv",file="linkage_map/SunRILs_filtered.csv",
-                        estimate.map=FALSE, na.strings=c("-","NA"),
-                        genotypes=c("AA","H","BB"), crosstype="riself")
-  # SunCross <-  read.cross(format="csv",file=glue("linkage_map/filt_premap/{fam}_filtered.csv"),
-  #                         estimate.map=FALSE, na.strings=c("-","NA"),
-  #                         genotypes=c("AA","H","BB"), crosstype="riself")
+  # SunCross<- read.cross(format="csv",file="linkage_map/SunRILs_filtered.csv",
+  #                       estimate.map=FALSE, na.strings=c("-","NA"),
+  #                       genotypes=c("AA","H","BB"), crosstype="riself")
+  SunCross <-  read.cross(format="csv",file=glue("linkage_map/filt_premap/{fam}_filtered.csv"),
+                          estimate.map=FALSE, na.strings=c("-","NA"),
+                          genotypes=c("AA","H","BB"), crosstype="riself")
   # ##create map
   print("Choose chromosomes")
   p1 <- as.numeric(readline("First p-value? 10^-n "))
@@ -99,7 +109,7 @@ for (fam in redone_fams) {
   
   if (length(remove) > 1) {
     ##optional: create a second map with the remaining chromosome groups at a higher p-value
-    p2 <-  as.numeric(readline(glue("Second p-value? 10^-n, first was {p1}")))
+    p2 <-  as.numeric(readline(glue("Second p-value? 10^-n, first was {p1}: ")))
     print("Choose chromosomes pt 2")
     map2 <- subset(SunCross, chr=unique(head(gsub("\\..*", "", remove), -1)))
     map2 <- make_map(map2, p_value = 10^-p2)
