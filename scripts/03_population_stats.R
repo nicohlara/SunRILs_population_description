@@ -177,6 +177,39 @@ ggplot(data.for.PC.plot, aes(x = PC1, y = PC2)) +
 ggsave('figures/pca_plot.png', width=12, height=4)
 
 
+###PCA clustering of parents
+par_geno <- select.inds(genotype, famid == 'Parent')
+M <- as.matrix(par_geno)
+pcs = prcomp(M)
+pc.vars <- data.frame(PC.num = 1:length(pcs$sdev),
+                      PC = colnames(pcs$x),
+                      var = (pcs$sdev)^2/sum((pcs$sdev)^2))
+ggplot(pc.vars,
+       aes(x=PC.num,
+           y=var)) +
+  geom_point() + 
+  geom_line() +
+  labs(title='Scree plot of PC variances of marker data')
+##make classifying group dataframe
+line.orig = select(par_geno@ped, c(famid, id))
+data.for.PC.plot = data.frame(pcs$x) %>%
+  mutate(id = row.names(pcs$x))
+data.for.PC.plot = merge(line.orig, data.for.PC.plot, by='id') %>%
+  dplyr::rename(line = id, group = famid) #%>%
+##visualize PCA grouping
+HIL <- data.for.PC.plot[data.for.PC.plot$line=="HILLIARD",1:4]
+GA <- data.for.PC.plot[data.for.PC.plot$line=="GA06493-13LE6",1:4]
+NC08 <- data.for.PC.plot[data.for.PC.plot$line=="NC08-23383",1:4]
+
+ggplot(data.for.PC.plot, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = line), size=4, alpha = 0.7) +
+  theme_minimal() +
+  geom_text(aes(label = line), vjust = 1.25) + 
+  xlab(paste0(pc.vars[1,'PC'], " ", round(pc.vars[1,'var']*100, 1), "%")) +
+  ylab(paste0(pc.vars[2,'PC'], " ", round(pc.vars[2,'var']*100, 1), "%"))
+ggsave('figures/pca_parent_plot.png', width=12, height=4)
+
+
 ##plot phenotypes
 parents1 = c('HILLIARD', "GA06493-13LE6", "NC08-23383")
 groups <- data.frame()
@@ -202,8 +235,20 @@ png(filename = glue('figures/trait_summaries.png'),
     bg='transparent')
 nf <- layout(matrix(c(1:4), 2,2 ,byrow=T),widths=rep(3.5, 4), heights = rep(1, 4), respect=T)
 par(mar=c(2,2,2,2))
+pcex = 1
+ncex=1
 
 for (trait in colnames(blues)[-c(1:2)]) {
+  # # ##save individual trait
+  # res_val=1
+  # png(filename = glue('figures/pheno_summary_{trait}.png'),
+  #     width=1700*res_val, height=500*res_val, res=72*res_val,
+  #     bg='transparent')
+  # nf <- layout(matrix(c(1:2), 1,2 ,byrow=T),widths=c(3.5, .5), heights = c(1, 1), respect=T)
+  # 
+  # par(mar=c(4,3,2,0), cex=2)
+  # pcex = 0.75
+  # ncex=2
   pp <- pirateplot(glue("{trait} ~ Cross_ID"), data=blues, plot=F)
   fam_order <- pp$summary %>% arrange(avg)
   plot_blues <- blues %>%
@@ -216,16 +261,22 @@ for (trait in colnames(blues)[-c(1:2)]) {
   groups1 <- groups1 %>%
     left_join(pedigree %>% select(Cross_ID, off_parent = Parent_1), by = "Cross_ID") %>%  
     mutate(x = row.names(groups1)) %>%
-    left_join(blues %>% select(Entry, all_of(trait)) %>% rename(NAM = Entry), by="NAM") %>%
-    left_join(blues %>% select(Entry,  all_of(trait)) %>% rename(off_parent = Entry), by="off_parent")
+    left_join(blues %>% dplyr::select(Entry, all_of(trait)) %>% dplyr::rename(NAM = Entry), by="NAM") %>%
+    left_join(blues %>% dplyr::select(Entry,  all_of(trait)) %>% dplyr::rename(off_parent = Entry), by="off_parent")
   groups1[groups1$NAM == "HILLIARD_GA06493-13LE6", glue("{trait}.x")] <- blues[blues$Entry == "HILLIARD", trait]
   pirateplot(glue("{trait} ~ Cross_ID"), data=plot_blues,
              bean.f.col = groups1$cols,
-             main=trait)
-  ##add in parent phenotype
-  points(groups1$x, groups1[,glue("{trait}.x")], col=groups1$cols, cex=3, pch=17)
+             main=trait, cex.names=ncex)
+             # main=trait, cex.names=ncex, xaxt = NA, xlab=NA)
+  # axis(side=1, at=groups1$x, labels=groups1$Cross_ID, las = 2)
+  points(groups1$x, groups1[,glue("{trait}.x")], col=groups1$cols, cex=3*pcex, pch=17)
   groups1[groups1$NAM == "HILLIARD_GA06493-13LE6", 'cols'] <- "#313D7D"
-  points(groups1$x, groups1[,glue("{trait}.y")], col='white', cex=3, pch=18)
+  points(groups1$x, groups1[,glue("{trait}.y")], col='white', cex=3*pcex, pch=18)
+# 
+#   par(mar=c(2,0,2,0), cex=2)
+#   plot(c(0,0,0,0), c(1,2,3,4), xlim=c(-0.25,2), ylim=c(0.5,4.5), pch=15, cex=2 ,col=c("#B49844", "#313D7D", "#B81848", '#326955'), axes=F, xlab=NA, ylab=NA)  ##add in parent phenotype
+#   text(0.25, c(1,2,3,4), cex=.75, pos=4,c('GA06493-13LE6', 'HILLIARD', 'NC08-23383', 'HIL/GA'))
+#   dev.off()
 }
 dev.off()
 
@@ -299,8 +350,8 @@ phenotype <- phenotype %>%
   dplyr::rename(HD = flowering, PM = Powdery_mildew)
 
 g <- select.inds(genotype, id %in% phenotype$Entry)
-kinship <- gaston::GRM(g, autosome.only=F, chunk = 10)
-# kinship <- G.matrix(M = as.matrix(g), method="VanRaden")$G
+# kinship <- gaston::GRM(g, autosome.only=F, chunk = 10)
+kinship <- G.matrix(M = as.matrix(g), method="VanRaden")$G
 ki <- solve(kinship)
 pheno_file <- filter(phenotype, Entry %in% genotype@ped$id)
 
@@ -406,8 +457,8 @@ average_distances <- genotype@snps %>%
 ld_geno <- LD.thin(genotype, threshold=0.8, max.dist=350e6)
 ld <- LD(ld_geno, c(1, ncol(ld_geno)))
 fived_markers <- grep("5D", colnames(ld), value=T)
-fived <- ld[,colnames(ld) == "S5D_463976571"]
-fived[fived > .1]
+fived <- ld[,colnames(ld) == "S5D_465493250"]
+fived[fived > .5]
 tail(fived[order(fived)])
 
 ld5d <- ld[fived_markers, fived_markers]

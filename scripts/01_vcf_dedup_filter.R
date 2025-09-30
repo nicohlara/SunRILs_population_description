@@ -9,7 +9,7 @@ library(stringr)
 setwd(here())
 
 blues <- read.delim("data/blues.csv", sep=",")
-genotype <- read.vcf("data/processed_vcf/SunRILs_imp_filt.vcf.gz", convert.chr=F)
+genotype <- read.vcf("data/processed_vcf_allsequencedata_20250817/SunRILs_imp_filt.vcf.gz", convert.chr=F)
 pedigree <- read.csv("data/cross_info.csv", header=F, col.names = c("Cross_ID", "Parent_1", "Parent_2"))
 genotype@ped$famid <- ifelse(grepl("UX", genotype@ped$id), str_sub(genotype@ped$id, 1, 6), 'Parent')
 
@@ -66,7 +66,7 @@ genotype5 <- select.inds(genotype5, !(id %in% paste0("UX1992-", c(319, 8, 336, 2
 
 dim(genotype); dim(genotype1); dim(genotype2); dim(genotype3); dim(genotype4); dim(genotype5)
 
-write.bed.matrix(genotype5, "data/SunRILs_imp_filtmerge")
+write.bed.matrix(genotype2, "data/SunRILs_imp_filtmerge")
 
 
 
@@ -75,15 +75,24 @@ g@ped$famid <- ifelse(grepl("UX", g@ped$id), str_sub(g@ped$id, 1, 6), 'Parent')
 
 # g1 <- select.snps(g, maf > 0.011)
 gt <- select.inds(g, famid == 'Parent')
-gp <- select.snps(gt, callrate > 0.9)
+gp <- select.snps(gt, callrate > 0.8)
 g1 <- select.snps(g, id %in% gp@snps$id)
-g1 <- select.snps(g1, N1/nrow(g1) < 0.2) 
-g1 <- select.inds(g1, N1/ncol(g1) < 0.2)
+g1 <- select.snps(g1, N1/nrow(g1) < 0.1) 
+g1 <- select.inds(g1, N1/ncol(g1) < 0.1)
 
-
+variation_marker <- c()
 for (fam in grep("UX", unique(g1@ped$famid), value=T)) {
   print(fam)
   gt <- select.inds(g1, famid == fam)
-  gt <- select.snps(gt, maf > 0.3)
+  gt <- select.snps(gt, NAs/nrow(gt) < 0.5) 
   g2 <- select.snps(g1, id %in% gt@snps$id)
+  gt <- select.snps(gt, maf > 0.3)
+  variation_marker <- unique(c(variation_marker, gt@snps$id))
 }
+g3 <- select.snps(g2, id %in% variation_marker)
+print(dim(g2)); print(dim(g3))
+
+depth <- read.delim('depth.txt', header=F)
+depth1 <- as.data.frame(lapply(depth[-c(1:3)], function(x) sub("^.*?:.*?:(.*?):.*?:.*$", "\\1", x)))
+dv <- as.numeric(as.vector(as.matrix(depth1)))
+hist(dv[dv < 100])

@@ -25,11 +25,22 @@ for (fam in pedigree$Cross_ID) { ##original
 # for (fam in redone_fams) {
   print(fam)
   # vcf <- read.vcf(glue("linkage_map/biparental_vcf/{fam}_subset.vcf.gz"), convert.chr =FALSE)
-  vcf <- read.vcf(glue("data/processed_vcf/{fam}_filt.vcf.gz"), convert.chr = F)
-  genotype <- as.data.frame(as.matrix(vcf), stringAsFactors = F) 
+  # vcf <- read.vcf(glue("data/processed_vcf/{fam}_filt.vcf.gz"), convert.chr = F)
+  vcf <- read.vcf(glue("data/biparental_vcf/SunRILs_{fam}_filt.vcf.gz"), convert.chr=F)
+  ##filter for markers with high parent coverage
+  vcf@ped$famid <- ifelse(grepl("UX", vcf@ped$id), str_sub(vcf@ped$id, 1, 6), 'Parent')
+  gt <- select.inds(vcf, famid == 'Parent')
+  gt <- select.snps(gt, callrate > 0.8)
+  vcf1 <- select.snps(vcf, id %in% gt@snps$id)
+  ##filter for heterozygous markers/individuals
+  vcf2 <- select.snps(vcf1, N1/nrow(vcf1) < 0.2)
+  vcf3 <- select.inds(vcf2, N1/ncol(vcf2) < 0.2)
+  print(dim(vcf));print(dim(vcf1));print(dim(vcf2));print(dim(vcf3));
+  genotype <- as.data.frame(as.matrix(vcf3), stringAsFactors = F) 
   cross <- convert_vcf_to_cross(genotype, blues)
   # cross <- convert_vcf_to_cross(vcf, blues)
   write.csv(cross, glue("linkage_map/cross_objects/{fam}_rqtl.csv"), row.names=FALSE)
+  print("")
 }
 
 ##read in and create histograms for setting filter thresholds
@@ -45,11 +56,11 @@ for (fam in pedigree$Cross_ID) {
 
 
 filter <- data.frame(family = c("UX1989", "UX1991", "UX1992", "UX1993", "UX1994", "UX1995", "UX1997", "UX2000", "UX2010", "UX2012", "UX2013", "UX2023", "UX2026", "UX2029", "UX2031"),
-                    popmiss = c( 17.5,     20,       20,       17.5,     12.5,       20,       20,       22.5,     25,      22.5,       20,     22.5,     20,       20,       22.5),
-                     markmiss =c(0.65,    .6,        .7,       .55,      .55,       .7,       .6,       .65,      .65,      .7,      .65,      .7,       .65,       .7,       .7))
+                    popmiss = c( 17.5,     20,       12.5,       17.5,     7.5,       20,       20,       22.5,     25,      22.5,       20,     12.5,     20,       20,       22.5),
+                     markmiss =c(0.65,    .6,        .75,       .55,      .55,       .7,       .6,       .65,      .65,      .7,      .65,      .7,       .65,       .7,       .7))
 rownames(filter) <- pedigree$Cross_ID
 
-redo <- c("UX1994")
+redo <- c("UX1992", "UX1994", "UX2023")
 # fam <- pedigree$Cross_ID[15]
 ##filter down the markers
 # for (fam in pedigree$Cross_ID) {
@@ -89,7 +100,8 @@ stats <- list()
 fam <- pedigree$Cross_ID[2]
 
 ##make maps
-for (fam in pedigree$Cross_ID) {
+# for (fam in pedigree$Cross_ID) {'
+for (fam in redo) {
   print(fam)
   # SunCross<- read.cross(format="csv",file="linkage_map/SunRILs_filtered.csv",
   #                       estimate.map=FALSE, na.strings=c("-","NA"),
@@ -184,8 +196,6 @@ for (fam in pedigree$Cross_ID) {
   stats[[glue("{fam}_joined")]] <- to_join
   stats[[glue("{fam}_removed_markers")]] <- markers_to_remove
   stats[[glue("{fam}_final_groups")]] <- final_chroms
-  
-  
 }
 
 sink(glue("{output_directory}/linkage_creation_details.txt"))

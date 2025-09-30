@@ -21,9 +21,6 @@ chrom_lengths <- read.delim("data/chromosome_lengths.tsv")
 
 chrom_lengths_split <-  read.delim("data/chrom_lengths_split.txt")
 
-
-
-###note, UX2023 doesn't seem to have an alt parent (AGS2000)
 #standardize input if necessary
 for (fam in pedigree$Cross_ID) {
   print(fam)
@@ -78,9 +75,7 @@ for (fam in pedigree$Cross_ID) {
   write.table(gt2, file = glue("{out_file}_conv.csv"), quote = F, row.names = F, col.names = T, sep=",", na="")
 }
 
-
-##note: UX2023 needs remaking
-for (fam in pedigree$Cross_ID) {
+for (fam in pedigree$Cross_ID[-c(1:5)]) {
   print(fam)
   cross <- read.cross(format="csv",file=glue("linkage_map/maps/{fam}_linkage_map_conv.csv"),
                       estimate.map=FALSE, na.strings=c("-","NA"),
@@ -132,6 +127,8 @@ for (fam in pedigree$Cross_ID) {
 }
 peak_df <- merge(peak_df, peak_effects, by=c('Pos', 'cross', 'trait'))
 write.table(peak_df, file="outputs/qtl2_cim.tsv", quote=F, sep="\t", row.names=F)
+peak_df <- read.table(file="outputs/qtl2_cim.tsv", header=T)
+
 # peak_effects_subset <- peak_effects[paste0(peak_effects$Pos, peak_effects$cross, peak_effects$trait) %in% paste0(peaks$Pos, peaks$cross, peaks$trait),]
 # write.table(peak_effects, file="outputs/qtl2_cim_peak_effects.tsv", quote=F, sep="\t", row.names=F)
 
@@ -283,6 +280,57 @@ for (row in 1:nrow(ped)) {
   }
 }
 dev.off()
+
+
+##plot one linkage map at a time
+plot_depth=2
+for (row in 1:nrow(ped)) {
+  png(filename = glue("figures/linkage_maps/lm_{ped[row, 'Cross_ID']}.png"),  
+      width=plot_width*plot_size*res_val, height=plot_depth*plot_size*res_val)
+  par(mar=c(2,0,1,0))
+  plots <- plot_width*plot_depth
+  nf <- layout(matrix(c(1:plots), plot_depth, plot_width, byrow=T),
+               heights=matrix(c(rep(plot_size, plot_width*plot_depth)), plot_depth, byrow=T),
+               widths=matrix(c(rep(plot_size, plot_width*plot_depth)), plot_depth, byrow=T))
+  plot.new()
+  
+  for (chr in chrom_lengths$Chromosome) {
+    plot.new()
+    text(0.5,0.5, chr, cex=text_cex*1.5)
+  }
+  
+  fam <- ped$Cross_ID[row]
+  print(fam)
+  plot.new()
+  text(0,0.75, ped[row, 'Parent_2'], cex=text_cex*0.75, pos=4)
+  text(0,0.25, ped[row, 'Parent_1'], cex=text_cex*0.75, pos=4)
+  text(1, 0.5, ped[row, 'Cross_ID'], cex=text_cex, pos=2)
+  cross <- read.cross(format="csv",file=glue("linkage_map/maps/{fam}_linkage_map.csv"),
+                      estimate.map=FALSE, na.strings=c("-","NA"),
+                      genotypes=c("A","H","B"), crosstype="riself")
+  groups <- summary.map(cross)
+  for (chrom in chrom_lengths$Chromosome) {
+    ymax <- chrom_lengths[chrom_lengths$Chromosome == chrom, 'End']*1.3
+    grps <- grep(chrom, rownames(groups), value=T)
+    if (length(grps) > 0) {  
+      dfs <- lapply(grps, function(g) {
+        d <- chrom_df(cross, g)
+        d$grp <- g  # Keep track of group for later
+        return(d)
+      })
+      if (length(dfs) > 1) {for (i in 2:length(dfs)) {m <- max(dfs[[i-1]][['cM']]); dfs[[i]][['cM']] <- dfs[[i]][['cM']] + m}}
+      df_all <- do.call(rbind, dfs) %>%
+        dplyr::mutate(cM = as.numeric(cM), pos = as.numeric(pos))
+      if (max(df_all$pos) > ymax) {print(glue("too big: {chrom}"))}
+      plot(df_all$cM, df_all$pos, cex=plot_cex, pch=20, xlab="cM", ylim=c(1, ymax), yaxt='n', ann=F)
+      if (length(dfs) > 1) {for (i in 2:length(dfs)) {abline(v = min(dfs[[i]][['cM']]), col='red', cex=2)}}
+    } else {
+      plot.new()
+    }
+  }
+  dev.off()
+}
+
 
 
 ##get total markers/chrom for all linkage groups

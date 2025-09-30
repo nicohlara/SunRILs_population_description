@@ -112,7 +112,7 @@ hc <- hclust(snps_dist, method = "ward.D2")
 phylo <- as.phylo(hc)
 
 ##color clustering
-clusters <- cutree(hc, k=15)
+clusters <- cutree(hc, k=3)
 famid <- vcf@ped$famid
 names(famid) <- vcf@ped$id
 
@@ -158,8 +158,21 @@ UX1992_remove <- paste0("UX1992-", c(319, 8, 336, 273, 303, 9, 56, 211, 316 ))
 
 removal <- c(fishy, fishy2, fishy3, fishy4, UX1992_remove)
 
-keyfile <- read.delim("data/cladogram_keyfile.tsv")
+keyfile <- read.delim("data/keyfiles/cladogram_keyfile.tsv")
 keyfile <- filter(keyfile, !(FullSampleName %in% removal))
 keyfile$FullSampleName <- sub(":.*", "", keyfile$FullSampleName)
 # keyfile <- dplyr::filter(keyfile, !(Flowcell %in% c("2436449055", "2441621533")))
 write.table(keyfile, "data/SNP_calling_cladoclean_aviti_illumina.tsv", quote = F, row.names=F, sep="\t")
+
+
+
+
+##parent clustering
+p <- ggtree(phylo) %<+% tip_metadata +  # %<+% joins metadata
+  geom_tiplab(aes(label = label), size = 4) +  # labels at end
+  theme_tree2() +  # nice axis theme
+  theme(legend.position = "right") +
+  xlim(0, 210)
+
+print(p)
+ggsave("figures/parent_cladogram.png", scale=1, limitsize=F, width=16, height = 16, dpi=300)

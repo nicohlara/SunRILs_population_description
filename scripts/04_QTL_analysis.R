@@ -66,7 +66,7 @@ pks1$Chromosome <- apply(pks1, 1, function(x) {y <- as.numeric(x[[5]])*1e6; cls[
                                                                                
 
 peak_summary <- as.data.table(pks1)[, {
-  idx <- which.max(abs(AA))
+  idx <- which.max(abs(lod))
   .(
     Position = Position[idx],
     LOD = lod[idx],
@@ -84,7 +84,7 @@ peak_summary1 <- merge(peak_summary, pedigree, by='Cross_ID') %>%
 
 #convert to NAM founder allele coding
 peak_summary1 <- peak_summary1 %>%
-  rename("NC08-23383" = NC08,
+  dplyr::rename("NC08-23383" = NC08,
          "GA06493-13LE6" = GA13LE6) %>%
   rowwise() %>%
   ungroup()
@@ -110,17 +110,13 @@ plot_QTL_heatmap <- function(peaks, trt) {
     
   ggplot(pks, aes(x = Chromosome, y = cross_label, fill = AA)) +
     geom_point(aes(fill = AA, size = LOD_binned), shape = 22, colour = 'gray90') +
-    
+
     scale_fill_gradient2(
       low = "blue", mid = "white", high = "red", 
       midpoint = 0, na.value = "grey60", name = "AA Effect"
     ) +
     scale_size_manual(name = "LOD", values = c("2.5-5" = 2, "5-10" = 6, ">10" = 9)) +
-    scale_shape_manual(
-      name = NULL,
-      values = c("Missing parent genotype" = 21)
-    ) +
-    
+    scale_y_discrete(limits = levels(pks$cross_label)) +
     theme_minimal(base_size = 12) +
     labs(x = "Chromosome", y = "Cross", title = glue("QTL effect for {trt}")) +
     theme(
@@ -198,6 +194,7 @@ ggplot() +
   
   scale_x_continuous(breaks = unique(triangles$x), labels = unique(wdrhd$Chromosome)) +
   scale_y_continuous(breaks = unique(triangles$y), labels = unique(wdrhd$cross_label)) +
+  scale_y_discrete(limits = levels(triangles$cross_label)) +
   theme_minimal() +
   theme(
     axis.text.x = element_text(angle = 60, hjust = 1),

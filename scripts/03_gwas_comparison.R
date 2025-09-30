@@ -45,7 +45,7 @@ analysis$trait <- sapply(analysis$trait, function(x) if (x %in% names(traits)) t
 analysis <- analysis %>% mutate(trait = factor(trait, levels=c("WDR", "HD", "PM", "Height")))
 
 ##subset down to more stringent marker set
-bonf_threshold <- (0.05 / 58146) ## total number of SNPs available
+bonf_threshold <- (0.05 / 59473) ## total number of SNPs available
 analysis <- filter(analysis, P.value <= bonf_threshold)
 
 write.table(analysis, "outputs/combined_GWAS.tsv", quote=F, sep="\t", row.names=F)
@@ -62,6 +62,18 @@ ggplot(analysis, aes(x = Position, y = -log10(P.value), color = model)) +
   theme(panel.spacing = unit(0, "lines"), axis.text.x = element_text(angle = 60, hjust = 1)) +
   scale_x_continuous(breaks=c(0, 4e8, 8e8), limits=c(0, 1e9))
 ggsave("figures/gwas_peaks.png", plot = last_plot(), width = 12, height = 4)
+
+trt <- "PM"
+trait_analysis <- filter(analysis, trait == trt)
+ggplot(trait_analysis, aes(x = Position, y = -log10(P.value), color = model)) +
+  geom_point(size=1.5) +
+  facet_grid(~Chromosome) +
+  labs(x = "Position", y = "-log10(P.value)", color = "Model", title=glue("GWAS of {trt}")) +
+  theme_bw() +
+  theme(panel.spacing = unit(0, "lines"), axis.text.x = element_text(angle = 60, hjust = 1)) +
+  scale_x_continuous(breaks=c(0, 4e8, 8e8), limits=c(0, 1e9))
+ggsave(glue("figures/gwas_{trt}.png"), plot = last_plot(), width = 12, height = 4)
+
 
 
 ## group markers into peaks
@@ -190,9 +202,9 @@ qtl_data <- output_QTL_summary %>%
   filter(!(is.na(LOD_peak))) %>% 
   unique()
 
-gene_data <- read.delim("outputs/peaks_annotated.csv", sep=",") %>% 
+gene_data <- read.delim("outputs/identified_qtl.csv", sep=",") %>% 
   dplyr::filter(!(is.na(gene_start))) %>% 
-  dplyr::select(chromosome, gene_start, gene_end, Gene, Status) %>%
+  dplyr::select(chromosome, gene_start, gene_end, Gene, Status, trait) %>%
   mutate(gene_start = gene_start/1e6, gene_end = gene_end/1e6, text_color = ifelse(Status == "Present", "#000000", "#888888")) %>%
   unique() 
   
@@ -203,16 +215,17 @@ chrom_sizes_mb <- chrom_sizes %>%
          Start = Start / 1e6,
          End = End / 1e6)
 
-
+alltrait_gene <- dplyr::select(gene_data, -c(trait)) %>%
+  unique()
 # Create the lollipop plot
 lolli <- ggplot(qtl_data, aes(x = LOD_peak, y = chromosome)) +
   geom_segment(data = chrom_sizes_mb,
                aes(x = Start, xend = End, y = Chromosome, yend = Chromosome),
                color = "gray90", size = 5) +
-  geom_point(data = gene_data, aes(x = gene_start, y = chromosome), color = gene_data$text_color, size = 4, pch = '|') +
-  geom_text_repel(data = gene_data,
+  geom_point(data = alltrait_gene, aes(x = gene_start, y = chromosome), color = alltrait_gene$text_color, size = 4, pch = '|') +
+  geom_text_repel(data = alltrait_gene,
             aes(x = gene_start, y = chromosome, label = Gene),
-            color=gene_data$text_color,
+            color=alltrait_gene$text_color,
             size = 3, max.overlaps=nrow(qtl_data)) +
   geom_point(aes(color = trait, size = LOD)) +
   scale_size_continuous(range = c(2, 6)) +
@@ -230,6 +243,36 @@ lolli <- ggplot(qtl_data, aes(x = LOD_peak, y = chromosome)) +
   )
 lolli
 ggsave("figures/gene_lollipop.png", plot = lolli, width = 8, height = 5)
+
+# Create trait-specific lollipop plot
+trt <- "PM"
+qtl_trait <- filter(qtl_data, trait == trt)
+gene_trait <- dplyr::filter(gene_data, trait == trt)
+lolli <- ggplot(qtl_trait, aes(x = LOD_peak, y = chromosome)) +
+  geom_segment(data = chrom_sizes_mb,
+               aes(x = Start, xend = End, y = Chromosome, yend = Chromosome),
+               color = "gray90", size = 5) +
+  geom_point(data = gene_trait, aes(x = gene_start, y = chromosome), color = gene_trait$text_color, size = 4, pch = '|') +
+  geom_text_repel(data = gene_trait,
+                  aes(x = gene_start, y = chromosome, label = Gene),
+                  color=gene_trait$text_color,
+                  size = 3, max.overlaps=nrow(qtl_data)) +
+  geom_point(aes(color = trait, size = LOD)) +
+  scale_size_continuous(range = c(2, 6)) +
+  labs(
+    x = "Position on Chromosome (Mb)",
+    y = "Chromosome",
+    size = "LOD Score",
+    color = "Trait"
+  ) +
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(size = 10),
+    legend.position = "right"
+  )
+lolli
+ggsave(glue("figures/gene_lollipop_{trt}.png"), plot = lolli, width = 8, height = 5)
 
 
 ##compare to CIM results
@@ -265,7 +308,7 @@ cim_summary <- data.table(cim_peaks)[, {
   )
 }, by = .(trait, Chromosome, peak_group)]
 cim_summary %>% select(-c(peak_group, nmar, pop_count)) %>%
-  mutate(peak_start = round(peak_start/1e6,1), peak_end=round(peak_end/1e6, 1), 
-         LOD_peak=round(LOD_peak/1e6), LOD=round(LOD/1e6)) %>%
+  mutate(peak_start = round(peak_start,1), peak_end=round(peak_end, 1), 
+         LOD_peak=round(LOD_peak/1e6), LOD=round(LOD, 0)) %>%
   filter(trait == 'PM') %>%
   data.frame()

@@ -40,11 +40,19 @@ geno.map <- genotype@snps %>%
 
 bonf_threshold <- (0.10 / ncol(genotype))
 
+# pheno_subset <- phenotype %>%
+#   dplyr::filter(Location == "Kinston" & Year == 2022) %>%
+#   select(Cross_ID, Entry, WDR, flowering, Powdery_mildew, Height) %>%
+#   rename(PM = Powdery_mildew, HD = flowering, Genotype = Entry) %>%
+#   mutate(Cross_ID = as.factor(Cross_ID))
+
+
 for (trait in colnames(blues)[-c(1:2)]) {
   print(trait)
   ##preprocess for gwas
   # gb <- blues[,c("Genotype", trait)]
   gwas_obj <- pre.gwas(pheno.data = blues,
+  # gwas_obj <- pre.gwas(pheno.data = pheno_subset,
                        indiv = 'Genotype',
                        geno.data = as.matrix(genotype),
                        resp = trait,
@@ -59,10 +67,25 @@ for (trait in colnames(blues)[-c(1:2)]) {
                       map.data = gwas_obj$map.data, 
                       bonferroni = F,
                       pvalue.thr=bonf_threshold)
-  manhattan.plot(gwas$gwas.all)
+  print(manhattan.plot(gwas$gwas.all))
   gtable <- gwas$gwas.sel
   gtable$trait <- trait
   if (exists("GWAS_table") & nrow(gtable) > 1) {GWAS_table <- rbind(GWAS_table, gtable)} else {GWAS_table <- gtable}
 }
 
 write.table(GWAS_table, "outputs/asreml_gwas.tsv", quote=F, sep="\t", row.names=F)
+# write.table(GWAS_table, "outputs/asreml_gwas_K22.tsv", quote=F, sep="\t", row.names=F)
+
+
+
+gwas_files <- grep("asreml", list.files('outputs', full.names = T), value=T)
+gwas_results <- lapply(gwas_files, function(f) {
+  df <- read.delim(f)
+  df$trial <- sub("\\.tsv$", "", sub("^outputs/", "", f))  # strip path & suffix
+  df
+})
+gwas_comptable <- do.call(rbind, gwas_results)
+ggplot(gwas_comptable, aes(x=pos, y=-log10(p.value), colour = trait)) +
+  geom_point() +
+  facet_grid(rows=vars(trial), cols= vars(chrom))
+ggsave("figures/asreml_gwas_multienvironment_comparison.png", width=24, height=6)

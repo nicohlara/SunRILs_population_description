@@ -15,17 +15,18 @@ library("asreml")
 cross_info <- read.delim('cross_info/cross_info.csv', sep=",") %>% filter(Cross_ID != 'UX1999')
 phenotype <- read.delim("phenotype/phenotype.csv", sep=",")
 
+phenotype$block <- sub("^(.*?)\\..*?\\..*?$", "\\1", phenotype$Tray)
 
 ## filter and subset data
 cross_names <- c(cross_info$Cross_ID, 'Parent')
 locations <- c('Kinston', 'Raleigh')
 years <- c('2022', '2023')
-effect_variables <- c("Location", "Year", "Cross_ID", "Entry",  "row", "column")
+effect_variables <- c("Location", "Year", "Cross_ID", "Entry", "block", "row", "column")
 traits <- data.frame(trait = c("WDR", "flowering", "Powdery_mildew", "Height"),
                      type = c("qualitative", "quantitative", "qualitative", "quantitative"))
 phenotype <- phenotype %>%
   mutate(Location = as.factor(Location), Cross_ID = as.factor(Cross_ID), Entry=as.factor(Entry), Year = as.factor(Year),
-         row = as.factor(row), column = as.factor(column)) %>%
+         block = as.factor(block), row = as.factor(row), column = as.factor(column)) %>%
   # mutate(WDR = round(WDR, 0), Powdery_mildew = round(Powdery_mildew, 0)) %>%
   dplyr::filter(Year %in% years & Cross_ID %in% cross_names, Location %in% locations) %>%
   dplyr::select(all_of(c(effect_variables, traits$trait)))
@@ -40,8 +41,12 @@ for (row in 1:nrow(traits)) {
   random_formula <- as.formula("~Location:Year")
   if (traits[row, "type"] == "qualitative") {
     pf[trait] <- ordered(round(pf[[trait]], 0))
+    level_num <<- length(unique(pf$Env))
+    pf <- dplyr::mutate(pf, Env = as.factor(paste0(Location, "_", Year))) %>%
+      complete(Env, block)
     model <- asreml(fixed=fix_formula,
-                    random=random_formula,
+                    random=as.formula("~Location:Year:block"),
+                    # residual = ~dsum(~ar1(block)| Env, levels=1:level_num),
                     # residual = as.formula("~Location:Year:ar1(row):ar1(column)"),
                     na.action=na.method(x='include', y='include'),
                     data=pf, workspace="8gb",
