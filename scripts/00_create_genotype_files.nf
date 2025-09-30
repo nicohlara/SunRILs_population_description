@@ -3,12 +3,12 @@ nextflow.enable.dsl=2
 // baseline parameters
 params.basedir = "/project/guedira_seq_map/nico/SunRILs_population_description"
 params.population_table = "${params.basedir}/data/cross_info.csv"
-params.output_dir = "${params.basedir}/data/processed_vcf"
+params.output_dir = "${params.basedir}/data/processed_vcf_allsequencedata_20250817"
 
 // discovery and production parameters
 params.fastq_dir = "/90daydata/guedira_seq_map/nico/fastq/"
 params.study = "SunRILs"
-params.keyfile = "${params.basedir}/data/SunRILs_keyfile_20250804"
+params.keyfile = "${params.basedir}/data/keyfiles/SNP_calling_cladoclean_aviti_illumina_20250817.tsv"
 params.ref = "/90daydata/guedira_seq_map/RefCS_2.1/iwgsc_refseqv2.1_assembly.fa"
 params.enzymes = "PstI-MspI"
 params.taglength = "85"
@@ -25,8 +25,8 @@ params.quality = '20'
 params.parent_callrate = '0.8'
 params.MAF = '0.3'
 params.missing = '0.5'
-params.marker_het = '0.2'
-params.sample_het = '0.2'
+params.marker_het = '0.15'
+params.sample_het = '0.15'
 
 
 // imputation parameters
@@ -204,20 +204,22 @@ process biparental_filter {
     path vcf
 
     output:
-    tuple path("${params.study}_filtered.vcf.gz"), path("consensus_markers.txt"), path("consensus_samples.txt")
+    tuple path(vcf), path("consensus_markers.txt"), path("consensus_samples.txt")
 
     script:
     """
 	#!/usr/bin/env Rscript
     library('gaston')
-    g <- read.vcf(${vcf}, convert.chr=F)
+    library('stringr')
+    g <- read.vcf("${vcf}", convert.chr=F)
+    print(dim(g))
     g@ped\$famid <- ifelse(grepl("UX", g@ped\$id), str_sub(g@ped\$id, 1, 6), 'Parent')
     gt <- select.inds(g, famid == 'Parent')
     gp <- select.snps(gt, callrate > ${params.parent_callrate})
     g1 <- select.snps(g, id %in% gp@snps\$id)
     g1 <- select.snps(g1, N1/nrow(g1) < ${params.marker_het}) 
     g1 <- select.inds(g1, N1/ncol(g1) < ${params.sample_het})
-
+    print(dim(g1))
     variation_marker <- c()
     for (fam in grep("UX", unique(g1@ped\$famid), value=T)) {
       print(fam)
@@ -229,17 +231,16 @@ process biparental_filter {
     }
     g3 <- select.snps(g2, id %in% variation_marker)
     print(dim(g2)); print(dim(g3))
-	
-	write.table(g3@snps\$id, "concensus_markers.txt", sep="\\t", quote = F, row.names=F, col.names=F)
-	write.table(g3@ped\$id, "concensus_samples.txt", sep="\\t", quote = F, row.names=F, col.names=F)
-	"""
+    write.table(g3@snps\$id, "consensus_markers.txt", sep="\\t", quote = F, row.names=F, col.names=F)
+    write.table(g3@ped\$id, "consensus_samples.txt", sep="\\t", quote = F, row.names=F, col.names=F)
+    """
 }
 
 process bcftools_consensus_filter {
     publishDir "${params.output_dir}", mode: 'copy'
 
     input:
-    tuple path(vcf), path(consensus_markers), path(concensus_samples)
+    tuple path(vcf), path(consensus_markers), path(consensus_samples)
 
     output:
     path "${params.study}_consensus_filtered.vcf.gz"
@@ -247,7 +248,7 @@ process bcftools_consensus_filter {
     script:
     """
     bcftools view -S ${consensus_samples} ${vcf} -Oz -o vcf_filt.vcf.gz
-	bcftools view --include ID==@${concensus_samples} vcf_filt.vcf.gz  -Oz -o ${params.study}_consensus_filtered.vcf.gz
+    bcftools view --include ID==@${consensus_markers} vcf_filt.vcf.gz  -Oz -o ${params.study}_consensus_filtered.vcf.gz
     """
 }
 
@@ -325,6 +326,6 @@ process merge_vcf {
         bcftools index -f "\${file}" 
     done < vcf_list.txt
 
-    bcftools merge --file-list vcf_list.txt --force-samples -Oz -o ${params.study}_imp_filt
+    bcftools merge --file-list vcf_list.txt --force-samples -Oz -o ${params.study}_imp_filt.vcf.gz
     """
 }
