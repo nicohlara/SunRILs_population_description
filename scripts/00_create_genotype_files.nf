@@ -3,13 +3,15 @@ nextflow.enable.dsl=2
 // baseline parameters
 params.basedir = "/project/guedira_seq_map/nico/SunRILs_population_description"
 params.population_table = "${params.basedir}/data/cross_info.csv"
-params.output_dir = "${params.basedir}/data/processed_vcf_allsequencedata_20250817"
+//params.output_dir = "${params.basedir}/data/processed_vcf_allsequencedata_20250817"
+params.output_dir = "/90daydata/guedira_seq_map/nico/testalign_Hilliard"
 
 // discovery and production parameters
-params.fastq_dir = "/90daydata/guedira_seq_map/nico/fastq/"
-params.study = "SunRILs"
-params.keyfile = "${params.basedir}/data/keyfiles/SNP_calling_cladoclean_aviti_illumina_20250817.tsv"
-params.ref = "/90daydata/guedira_seq_map/RefCS_2.1/iwgsc_refseqv2.1_assembly.fa"
+params.fastq_dir = "/90daydata/guedira_seq_map/fastq/"
+params.study = "HilRILs"
+params.keyfile = "${params.basedir}/data/keyfiles/Hilliard_crosses_keyfile.txt"
+//params.ref = "/90daydata/guedira_seq_map/RefCS_2.1/iwgsc_refseqv2.1_assembly.fa"
+params.ref = "/90daydata/guedira_seq_map/nico/Hilliard_ref/Taes_Hilliard_1.2.fasta"
 params.enzymes = "PstI-MspI"
 params.taglength = "85"
 params.minq = "0"
@@ -195,7 +197,8 @@ process bcftools_filter {
     bcftools view -i 'FORMAT/DP > ${params.depth_lower} && FORMAT/DP < ${params.depth_upper} && 'FORMAT/GQ' >= ${params.quality}' ${vcf} -Oz -o DP_filter.vcf.gz
     bcftools view -m2 -M2 -v snps DP_filter.vcf.gz -Oz -o biallelic.vcf.gz
     bcftools index -c biallelic.vcf.gz
-    bcftools view -t "^UNKNOWN" biallelic.vcf.gz -Oz -o "${params.study}_filtered.vcf.gz"
+    ##find unknown chromosome and contigs
+    bcftools view -t "1A,2A,3A,4A,5A,6A,7A,1B,2B,3B,4B,5B,6B,7B,1D,2D,3D,4D,5D,6D,7D" biallelic.vcf.gz -Oz -o "${params.study}_filtered.vcf.gz"
     """
 }
 
